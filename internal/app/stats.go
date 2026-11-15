@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/guard"
+	"github.com/avazar/zaslon/internal/guard"
 )
 
 // Day is one day of statistics.

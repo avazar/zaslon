@@ -2,9 +2,45 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestNewProfilesHaveNoSelectedApps(t *testing.T) {
+	for _, text := range []string{"", Render(Default()), "apps: []\n"} {
+		cfg, err := Parse([]byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Apps) != 0 || len(cfg.CustomApps) != 0 {
+			t.Fatalf("new profile selects apps: %+v", cfg.Apps)
+		}
+		for _, enabled := range cfg.DomainChecksEnabled {
+			if enabled {
+				t.Fatal("new profile enables a domain check")
+			}
+		}
+	}
+	// Existing explicit choices survive the new defaults.
+	cfg, err := Parse([]byte("apps: [claude, codex]\n"))
+	if err != nil || strings.Join(cfg.Apps, ",") != "claude,codex" {
+		t.Fatalf("existing apps changed: %+v %v", cfg, err)
+	}
+}
+
+func TestLegacyTerminationOptionsDoNotSurviveMigration(t *testing.T) {
+	c, err := Parse([]byte("grace: 0s\nclose_timeout: 0s\nfreeze_on_network_change: false\nblock_when_offline: false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := Render(c)
+	for _, key := range []string{"grace:", "close_timeout:", "freeze_on_network_change:", "block_when_offline:"} {
+		if strings.Contains(text, key) {
+			t.Errorf("obsolete option preserved: %s", key)
+		}
+	}
+}
 
 func TestRenderParseRoundTrip(t *testing.T) {
 	for _, lang := range []string{"ru", "en"} {
@@ -14,7 +50,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		c.CustomApps = []CustomApp{{Name: "My App", Match: []string{"/MyApp.app/", "myapp.exe"}}}
 		c.Allow.IPs = []string{"64.137.54.87", "10.0.0.0/8"}
 		c.Allow.Countries = []string{"NL", "DE"}
-		c.Grace = Duration(90 * time.Second)
+		c.CheckInterval = Duration(90 * time.Second)
 		c.MenuBar = "country"
 		c.AppRules = map[string]Allow{"cursor": {Countries: []string{"DE", "US"}}, "my app": {IPs: []string{"1.2.3.4"}}}
 		c.TrustedNetworks = []TrustedNetwork{{Name: "Дом", ID: "aa:bb:cc:dd:ee:ff"}}
@@ -26,7 +62,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		if Render(got) != Render(c) {
 			t.Fatalf("%s: round trip differs:\n%s\n---\n%s", lang, Render(c), Render(got))
 		}
-		if got.Grace.D() != 90*time.Second || got.CustomApps[0].Match[1] != "myapp.exe" {
+		if got.CheckInterval.D() != 90*time.Second || got.CustomApps[0].Match[1] != "myapp.exe" {
 			t.Fatalf("%s: values lost: %+v", lang, got)
 		}
 	}
@@ -44,7 +80,7 @@ func TestParseValidation(t *testing.T) {
 	bad := []string{
 		"allow:\n  countries: [Netherlands]",
 		"allow:\n  ips: [\"not-an-ip\"]",
-		"grace: soon",
+		"check_interval: soon",
 		"custom_apps:\n  - name: X",
 	}
 	for _, s := range bad {
@@ -59,7 +95,7 @@ func TestParseValidation(t *testing.T) {
 	if c.Allow.Countries[0] != "NL" || c.CheckInterval.D() != 3*time.Second || c.Language != "auto" {
 		t.Fatalf("not normalized: %+v", c)
 	}
-	if !c.FreezeOnNetworkChange || c.Grace.D() != 20*time.Second {
+	if c.MinAgree != 2 || !c.CheckIPv6 {
 		t.Fatal("missing keys must keep defaults")
 	}
 }
@@ -67,7 +103,7 @@ func TestParseValidation(t *testing.T) {
 func TestLoadCreatesFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "config.yaml")
 	c, created, err := Load(p)
-	if err != nil || !created || c.Apps[0] != "claude" {
+	if err != nil || !created || len(c.Apps) != 0 {
 		t.Fatalf("first load: %v %v %+v", err, created, c)
 	}
 	_, created, err = Load(p)

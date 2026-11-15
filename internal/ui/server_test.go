@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/app"
-	"github.com/ef1m03/kordon/internal/config"
-	"github.com/ef1m03/kordon/internal/guard"
-	"github.com/ef1m03/kordon/internal/procs"
+	"github.com/avazar/zaslon/internal/app"
+	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/guard"
+	"github.com/avazar/zaslon/internal/procs"
 )
 
 type noProcs struct{}
@@ -24,19 +24,21 @@ func (noProcs) Close(procs.Proc) error      { return nil }
 func (noProcs) Kill(procs.Proc) error       { return nil }
 
 func startServer(t *testing.T) (*Server, PanelInfo, *guard.Guard) {
-	t.Setenv("KORDON_DIR", t.TempDir())
+	t.Setenv("ZASLON_DIR", t.TempDir())
 	cfg := config.Default()
 	cfg.Allow.IPs = []string{"64.137.54.87"}
-	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "x" }, StartProbe: func(*config.Config) {},
+	var probeID uint64
+	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "x" }, StartProbe: func(_ *config.Config, id uint64, _ bool) func() { probeID = id; return nil },
 		Procs: noProcs{}, SaveConfig: func(*config.Config) error { return nil }})
 	g.Step(time.Now())
-	g.HandleProbe(time.Now(), guard.ProbeResult{IP: "64.137.54.87", Country: "NL", Votes: 2})
+	g.HandleProbe(time.Now(), guard.ProbeResult{ID: probeID, IP: "64.137.54.87", Country: "NL", Votes: 2})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s := &Server{G: g, Stats: app.LoadStats(), Version: "1.2.0"}
 	if err := s.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cancel(); s.WaitClosed() })
 	info, err := ReadPanelInfo()
 	if err != nil {
 		t.Fatal(err)

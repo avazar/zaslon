@@ -15,20 +15,26 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/app"
-	"github.com/ef1m03/kordon/internal/config"
-	"github.com/ef1m03/kordon/internal/guard"
-	"github.com/ef1m03/kordon/internal/procs"
+	"github.com/avazar/zaslon/internal/app"
+	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/guard"
+	"github.com/avazar/zaslon/internal/procs"
 )
 
 //go:embed panel
 var panelFiles embed.FS
 
-// Server is the local API behind the Kordon panel. It listens on 127.0.0.1 only,
+// PanelIconICO is the approved small-icon artwork used by the web and native panel.
+func PanelIconICO() []byte {
+	b, _ := panelFiles.ReadFile("panel/favicon.ico")
+	return b
+}
+
+// Server is the local API behind the Zaslon panel. It listens on 127.0.0.1 only,
 // and every request needs the random token from panel.json (readable by the user
 // only), so neither another site in a browser nor another user can reach it.
 type Server struct {
@@ -39,13 +45,16 @@ type Server struct {
 	UpdateAvailable func() string
 	InstallUpdate   func()
 
-	token string
-	addr  string
+	token   string
+	addr    string
+	panelMu sync.Mutex
+	panel   *panelLease
+	closed  chan struct{}
 }
 
-const cookieName = "kordon"
+const cookieName = "zaslon"
 
-// PanelInfo is what `kordon panel` reads to find the server.
+// PanelInfo is what `zaslon panel` reads to find the server.
 type PanelInfo struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
@@ -53,7 +62,7 @@ type PanelInfo struct {
 
 func panelInfoPath() string { return filepath.Join(app.Dir(), "panel.json") }
 
-// ReadPanelInfo returns the address of the running Kordon's panel.
+// ReadPanelInfo returns the address of the running Zaslon's panel.
 func ReadPanelInfo() (PanelInfo, error) {
 	var p PanelInfo
 	b, err := os.ReadFile(panelInfoPath())
@@ -71,12 +80,14 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
+		ln.Close()
 		return err
 	}
 	s.token = hex.EncodeToString(b)
 	s.addr = ln.Addr().String()
 	info, _ := json.Marshal(PanelInfo{URL: "http://" + s.addr + "/", Token: s.token})
-	if err := os.WriteFile(panelInfoPath(), info, 0o600); err != nil {
+	infoPath := panelInfoPath() // capture this profile; test/env changes must not redirect cleanup
+	if err := os.WriteFile(infoPath, info, 0o600); err != nil {
 		ln.Close()
 		return err
 	}
@@ -84,18 +95,28 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(panelFiles, "panel")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
+	mux.HandleFunc("GET /api/panel-session", func(w http.ResponseWriter, r *http.Request) { s.panelSession(ctx, w, r) })
 	mux.HandleFunc("GET /api/state", s.state)
 	mux.HandleFunc("GET /api/countries", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, countryList()) })
 	mux.HandleFunc("POST /api/do", s.do)
 
 	srv := &http.Server{Handler: s.guardRequest(mux), ReadHeaderTimeout: 5 * time.Second}
+	s.closed = make(chan struct{})
 	go func() {
+		defer close(s.closed)
 		<-ctx.Done()
-		_ = os.Remove(panelInfoPath())
+		_ = os.Remove(infoPath)
 		_ = srv.Close()
 	}()
 	go func() { _ = srv.Serve(ln) }()
 	return nil
+}
+
+// Called before releasing the profile lock during a normal shutdown.
+func (s *Server) WaitClosed() {
+	if s.closed != nil {
+		<-s.closed
+	}
 }
 
 // guardRequest checks the Host (against DNS rebinding), the token, and for
@@ -114,7 +135,7 @@ func (s *Server) guardRequest(next http.Handler) http.Handler {
 		}
 		c, err := r.Cookie(cookieName)
 		if err != nil || !s.tokenOK(c.Value) {
-			http.Error(w, "Откройте панель из меню Kordon. Open the panel from the Kordon menu.", http.StatusUnauthorized)
+			http.Error(w, "Откройте панель из меню Zaslon. Open the panel from the Zaslon menu.", http.StatusUnauthorized)
 			return
 		}
 		if r.Method == http.MethodPost && r.Header.Get("Origin") != "http://"+s.addr {
@@ -166,19 +187,31 @@ func ruleOf(a config.Allow) ruleJSON {
 }
 
 type appJSON struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Custom  bool      `json:"custom"`
-	Match   []string  `json:"match,omitempty"`
-	Enabled bool      `json:"enabled"`
-	Running bool      `json:"running"`
-	Status  string    `json:"status"`
-	Rule    *ruleJSON `json:"rule"`
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	Custom              bool                 `json:"custom"`
+	Match               []string             `json:"match,omitempty"`
+	Enabled             bool                 `json:"enabled"`
+	Running             bool                 `json:"running"`
+	Status              string               `json:"status"`
+	Rule                *ruleJSON            `json:"rule"`
+	Domains             []string             `json:"domains"`
+	DefaultDomains      []string             `json:"defaultDomains"`
+	DomainChecksEnabled bool                 `json:"domainChecksEnabled"`
+	Measurements        []guard.DomainResult `json:"measurements"`
+	Reason              string               `json:"reason"`
+	Warnings            []string             `json:"warnings"`
 }
 
 func panelStatus(s guard.Snapshot) string {
+	if len(s.Errors) != 0 {
+		return "error"
+	}
 	if s.Paused() {
 		return "paused"
+	}
+	if s.Status == guard.OK && len(s.Warnings) > 0 {
+		return "warning"
 	}
 	return [...]string{"starting", "ok", "frozen", "blocked"}[s.Status]
 }
@@ -192,15 +225,39 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 		running[p.AppID] = true
 	}
 	groupStatus := map[string]string{}
+	groupReason := map[string]string{}
+	measurements := map[string][]guard.DomainResult{}
+	groupWarnings := map[string][]string{}
+	var warnings []map[string]any
+	for _, warning := range snap.Warnings {
+		warnings = append(warnings, map[string]any{"reason": reasonKey(warning.Reason), "apps": warning.Apps})
+	}
 	for _, gr := range snap.Groups {
 		st := [...]string{"starting", "ok", "frozen", "blocked"}[gr.Status]
+		if gr.Status == guard.OK && len(gr.Warnings) > 0 {
+			st = "warning"
+		}
+		if len(snap.Errors) != 0 {
+			st = "error"
+		}
 		for _, a := range gr.Apps {
 			groupStatus[a] = st
+			groupReason[a] = reasonKey(gr.Reason)
+			measurements[a] = gr.Domains
+			for _, warning := range gr.Warnings {
+				groupWarnings[a] = append(groupWarnings[a], reasonKey(warning))
+			}
 		}
 	}
 	var apps []appJSON
 	for _, p := range procs.Presets {
 		a := appJSON{ID: p.ID, Name: p.Name, Enabled: slices.Contains(cfg.Apps, p.ID), Running: running[p.ID], Status: groupStatus[p.Name]}
+		a.Domains = cfg.DomainChecks[p.ID]
+		a.DefaultDomains = config.DefaultDomains(p.ID)
+		a.DomainChecksEnabled = cfg.DomainCheckEnabled(p.ID)
+		a.Measurements = measurements[p.Name]
+		a.Reason = groupReason[p.Name]
+		a.Warnings = groupWarnings[p.Name]
 		if r, ok := cfg.AppRules[p.ID]; ok {
 			rj := ruleOf(r)
 			a.Rule = &rj
@@ -210,6 +267,11 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 	for _, c := range cfg.CustomApps {
 		id := strings.ToLower(c.Name)
 		a := appJSON{ID: id, Name: c.Name, Custom: true, Match: c.Match, Enabled: true, Running: running[id], Status: groupStatus[c.Name]}
+		a.Domains = cfg.DomainChecks[id]
+		a.DomainChecksEnabled = cfg.DomainCheckEnabled(id)
+		a.Measurements = measurements[c.Name]
+		a.Reason = groupReason[c.Name]
+		a.Warnings = groupWarnings[c.Name]
 		if r, ok := cfg.AppRules[id]; ok {
 			rj := ruleOf(r)
 			a.Rule = &rj
@@ -242,17 +304,17 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{
 		"lang": Lang, "goos": runtime.GOOS, "version": s.Version,
 		"status": panelStatus(snap), "statusText": StatusLine(snap), "reason": reasonKey(snap.Reason),
-		"graceLeft": int(snap.GraceLeft.Seconds()), "paused": snap.Paused(), "pausedUntil": pausedUntil,
-		"ip": snap.IP, "country": countryOf(snap.Country), "ip6": snap.IP6, "country6": countryOf(snap.Country6),
-		"others": snap.Others, "offline": snap.Offline, "allowedNow": snap.AllowedNow,
+		"paused": snap.Paused(), "pausedUntil": pausedUntil,
+		"ip": snap.IP, "country": countryOf(snap.Country), "ip6": snap.IP6, "country6": countryOf(snap.Country6), "ipv6Unknown": snap.IPv6Unknown,
+		"others": snap.Others, "offline": snap.Offline, "allowedNow": snap.Allowed(), "errors": snap.Errors,
+		"warnings": warnings, "ipv6Conflicting": snap.IPv6Conflicting,
 		"dns": snap.DNS, "dnsCountry": countryOf(snap.DNSCountry), "dnsLeak": snap.DNSLeak,
 		"netId": snap.NetID, "network": snap.Network, "trusted": trusted,
 		"apps": apps, "allow": ruleOf(cfg.Allow),
 		"settings": map[string]any{
-			"grace": int(cfg.Grace.D().Seconds()), "close_timeout": int(cfg.CloseTimeout.D().Seconds()),
 			"check_interval": int(cfg.CheckInterval.D().Seconds()), "min_agree": cfg.MinAgree,
-			"freeze_on_network_change": cfg.FreezeOnNetworkChange, "block_when_offline": cfg.BlockWhenOffline,
 			"check_ipv6": cfg.CheckIPv6, "dns_check": cfg.DNSCheck, "notifications": cfg.Notifications,
+			"ip_unavailable_action": cfg.IPUnavailableAction, "ipv6_unavailable_action": cfg.IPv6UnavailableAction,
 			"menubar": cfg.MenuBar, "update_check": cfg.UpdateCheck, "language": cfg.Language,
 		},
 		"autostart": app.AutostartEnabled(),
@@ -264,12 +326,12 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 }
 
 func reasonKey(r guard.Reason) string {
-	return [...]string{"", "net", "ip", "offline", "v6", "unconf", "dns"}[r]
+	return [...]string{"", "net", "ip", "offline", "v6", "unconf", "dns", "v6unknown", "domain_unknown", "domain_ip", "parent_policy", "v6conflict"}[r]
 }
 
 func eventKind(k guard.EventKind) string {
 	switch k {
-	case guard.EvFrozen, guard.EvDNSLeak:
+	case guard.EvFrozen, guard.EvDNSLeak, guard.EvDomainCheck:
 		return "warn"
 	case guard.EvBlocked, guard.EvKilledNew, guard.EvOffline:
 		return "bad"
@@ -289,6 +351,22 @@ type action struct {
 	IPs       []string        `json:"ips"`
 	Countries []string        `json:"countries"`
 	Settings  json.RawMessage `json:"settings"`
+	Domains   []string        `json:"domains"`
+	Enabled   *bool           `json:"enabled"`
+}
+
+func knownDomainApp(c *config.Config, id string) bool {
+	for _, p := range procs.Presets {
+		if p.ID == id {
+			return true
+		}
+	}
+	for _, a := range c.CustomApps {
+		if strings.ToLower(a.Name) == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) do(w http.ResponseWriter, r *http.Request) {
@@ -319,12 +397,57 @@ func (s *Server) apply(a action) error {
 		g.ToggleApp(now, a.App)
 	case "set_rule":
 		return s.setRule(now, a)
+	case "set_domains":
+		a.App = strings.ToLower(strings.TrimSpace(a.App))
+		current := g.Snapshot(now).Config
+		if !knownDomainApp(current, a.App) {
+			return errors.New("unknown app")
+		}
+		if len(a.Domains) > 8 {
+			return errors.New("at most 8 service domains per app")
+		}
+		var endpoints []string
+		for _, raw := range a.Domains {
+			endpoint, err := config.DomainEndpoint(raw)
+			if err != nil {
+				return err
+			}
+			if !slices.Contains(endpoints, endpoint) {
+				endpoints = append(endpoints, endpoint)
+			}
+		}
+		if current.DomainCheckEnabled(a.App) && len(endpoints) == 0 {
+			return errors.New("disable domain checks before saving an empty list")
+		}
+		g.Update(now, func(c *config.Config) {
+			if c.DomainChecks == nil {
+				c.DomainChecks = map[string][]string{}
+			}
+			c.DomainChecks[a.App] = endpoints
+		})
+	case "set_domain_checks":
+		a.App = strings.ToLower(strings.TrimSpace(a.App))
+		current := g.Snapshot(now).Config
+		if !knownDomainApp(current, a.App) || a.Enabled == nil {
+			return errors.New("known app and enabled boolean required")
+		}
+		if *a.Enabled && len(current.DomainChecks[a.App]) == 0 {
+			return errors.New("add at least one domain before enabling checks")
+		}
+		g.Update(now, func(c *config.Config) {
+			if c.DomainChecksEnabled == nil {
+				c.DomainChecksEnabled = map[string]bool{}
+			}
+			c.DomainChecksEnabled[a.App] = *a.Enabled
+		})
 	case "remove_rule":
 		g.Update(now, func(c *config.Config) { delete(c.AppRules, a.App) })
 	case "remove_custom":
 		g.Update(now, func(c *config.Config) {
 			c.CustomApps = slices.DeleteFunc(c.CustomApps, func(x config.CustomApp) bool { return strings.ToLower(x.Name) == a.App })
 			delete(c.AppRules, a.App)
+			delete(c.DomainChecks, a.App)
+			delete(c.DomainChecksEnabled, a.App)
 		})
 	case "add_custom":
 		name := strings.TrimSpace(a.Value)
@@ -377,7 +500,7 @@ func (s *Server) apply(a action) error {
 	case "report":
 		return app.OpenURL(app.ReportURL(s.Version))
 	case "open_url":
-		if a.Value == app.RepoURL || a.Value == app.StudioURL || strings.HasPrefix(a.Value, app.RepoURL+"/") {
+		if a.Value == app.RepoURL || strings.HasPrefix(a.Value, app.RepoURL+"/") {
 			return app.OpenURL(a.Value)
 		}
 		return errors.New("unknown link")
@@ -463,6 +586,40 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return err
 	}
+	// Validate these choices before Update can save or change any protection.
+	for _, key := range []string{"ip_unavailable_action", "ipv6_unavailable_action"} {
+		if value, exists := m[key]; exists {
+			v, ok := value.(string)
+			if !ok || !config.FailureAction(v).Valid() {
+				return errors.New("bad " + key)
+			}
+		}
+	}
+	allowedStrings := map[string][]string{
+		"dns_check": {"warn", "block", "off"}, "menubar": {"ip", "country", "icon"}, "language": {"auto", "ru", "en"},
+	}
+	for key, allowed := range allowedStrings {
+		if value, exists := m[key]; exists {
+			v, ok := value.(string)
+			if !ok || !slices.Contains(allowed, v) {
+				return errors.New("bad " + key)
+			}
+		}
+	}
+	for _, key := range []string{"check_ipv6", "notifications", "update_check"} {
+		if v, exists := m[key]; exists {
+			if _, ok := v.(bool); !ok {
+				return errors.New("bad " + key)
+			}
+		}
+	}
+	for _, key := range []string{"check_interval", "min_agree"} {
+		if v, exists := m[key]; exists {
+			if _, ok := v.(float64); !ok {
+				return errors.New("bad " + key)
+			}
+		}
+	}
 	num := func(k string, min int) (int, bool) {
 		f, ok := m[k].(float64)
 		if !ok {
@@ -470,13 +627,12 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 		}
 		return max(int(f), min), true
 	}
-	var err error
 	s.G.Update(now, func(c *config.Config) {
-		if n, ok := num("grace", 0); ok {
-			c.Grace = config.Duration(time.Duration(n) * time.Second)
+		if v, ok := m["ip_unavailable_action"].(string); ok {
+			c.IPUnavailableAction = config.FailureAction(v)
 		}
-		if n, ok := num("close_timeout", 0); ok {
-			c.CloseTimeout = config.Duration(time.Duration(n) * time.Second)
+		if v, ok := m["ipv6_unavailable_action"].(string); ok {
+			c.IPv6UnavailableAction = config.FailureAction(v)
 		}
 		if n, ok := num("check_interval", 3); ok {
 			c.CheckInterval = config.Duration(time.Duration(n) * time.Second)
@@ -485,21 +641,14 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 			c.MinAgree = n
 		}
 		for k, dst := range map[string]*bool{
-			"freeze_on_network_change": &c.FreezeOnNetworkChange, "block_when_offline": &c.BlockWhenOffline,
 			"check_ipv6": &c.CheckIPv6, "notifications": &c.Notifications, "update_check": &c.UpdateCheck,
 		} {
 			if v, ok := m[k].(bool); ok {
 				*dst = v
 			}
 		}
-		for k, allowed := range map[string][]string{
-			"dns_check": {"warn", "block", "off"}, "menubar": {"ip", "country", "icon"}, "language": {"auto", "ru", "en"},
-		} {
+		for k := range allowedStrings {
 			if v, ok := m[k].(string); ok {
-				if !slices.Contains(allowed, v) {
-					err = errors.New("bad " + k + ": " + strconv.Quote(v))
-					continue
-				}
 				switch k {
 				case "dns_check":
 					c.DNSCheck = v
@@ -513,5 +662,5 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 			}
 		}
 	})
-	return err
+	return nil
 }

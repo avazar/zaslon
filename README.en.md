@@ -1,123 +1,416 @@
-<p align="center"><img src="docs/img/icon.png" width="128" alt="Kordon"></p>
-
-<h1 align="center">Kordon</h1>
+> Based on [Kordon](https://github.com/ef1m03/kordon), version [v1.2.1](https://github.com/ef1m03/kordon/tree/v1.2.1), published under MIT. Zaslon is developed as an independent project.
 
 <p align="center">
-  <b>A kill switch for apps.</b> Your VPN drops, your IP changes or the internet goes away - Kordon freezes the apps you chose within a fraction of a second. The right IP is back - they carry on as if nothing happened.
+  <img src="internal/ui/panel/icon.svg" width="128" height="128" alt="Zaslon logo: a blue shield with a white snowflake">
 </p>
+
+<h1 align="center">Zaslon</h1>
+
+<p align="center">Suspend selected apps on network changes and disallowed public IP addresses.</p>
 
 <p align="center">
-  <a href="https://github.com/ef1m03/kordon/releases/latest"><img src="https://img.shields.io/github/v/release/ef1m03/kordon" alt="release"></a>
-  <a href="https://github.com/ef1m03/kordon/actions/workflows/ci.yml"><img src="https://github.com/ef1m03/kordon/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
-  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-555" alt="macOS, Windows, Linux">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
-  · <a href="README.md">Русский</a>
+  <a href="README.md">Русский</a> ·
+  <a href="#build-from-source">Build</a> ·
+  <a href="#recovery-after-a-crash">Recovery</a> ·
+  <a href="docs/NETWORK-CHECKS.md">Network checks (Russian)</a> ·
+  <a href="LICENSE">MIT</a>
 </p>
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/img/panel-overview-dark.png">
-    <img src="docs/img/panel-overview-light.png" width="760" alt="Kordon panel: protection status, public IP, IPv6, DNS and network">
-  </picture>
-</p>
+Zaslon checks the public IP against configured rules and suspends selected apps
+along with their detected descendants. On a relevant or unknown network event, it suspends
+processes before starting a fresh check. Automatic resumption requires a
+successful, current check by default. Explicit failure policies can permit
+continued operation with a warning when a measurement is unavailable.
 
-## Why Kordon
+**Zaslon is not a VPN, proxy, or packet filter.** It does not redirect traffic or
+change firewall rules, DHCP, DNS, routes, or adapter settings. Process suspension
+cannot guarantee that no packets bypass a VPN: an app may transmit before an
+event is handled, and data already handed to the OS may still be sent. Enforcing
+traffic restrictions at the network layer requires a separate, tested filter.
 
-| | VPN client kill switch | Firewall rules | **Kordon** |
-|---|:---:|:---:|:---:|
-| Only touches the apps you chose | ❌ cuts everything | ✅ | ✅ |
-| A 2-second VPN blip doesn't lose your work | ❌ | ❌ drops connections | ✅ freezes |
-| Allow a whole country, not one address | ❌ | ❌ | ✅ |
-| IP and country visible at a glance | ❌ | ❌ | ✅ |
-| Works with proxy-mode VPN clients | depends | ❌ | ✅ |
-| Catches IPv6 leaks when the VPN tunnels only IPv4 | not always | ❌ | ✅ |
-| Catches DNS leaks | not always | ❌ | ✅ |
-| Per-app rules | ❌ | by hand | ✅ |
-| No VPN needed at home, required in a café | ❌ | ❌ | ✅ trusted networks |
-| No admin rights needed | not always | ❌ | ✅ |
-| Same tool on macOS, Windows and Linux | ❌ | ❌ | ✅ |
+## Project status
 
-## What it does
+Development takes place on `dev`. There are no validated Zaslon releases for daily
+use yet. Installers, release publishing, and self-update are disabled.
 
-- **The Kordon panel**: a real window with status, apps, rules, networks, statistics, history and every setting. No file editing.
-- **Per-app rules**: Claude only from the Netherlands, Cursor from the EU and US. Groups work independently.
-- **Trusted networks**: work without a VPN at home or the office, protected everywhere else. Recognised by the router, no location permission needed.
-- **DNS leaks**: warns (or freezes) when lookups bypass the VPN.
-- **Statistics** for the last two weeks, and **Report a problem** with the log pre-filled and every IP/MAC masked.
+| Platform | Validated stages |
+|---|---|
+| Windows | Native tests, `go vet`, builds, and ready-EXE checks in CI. Suspension of a test app and its child, protection recovery after a crash, and emergency resumption. IPv4 VPN loss and reconnection also tested in a Windows 11 VM. |
+| Linux | GitHub Actions passed native tests, `go vet`, the race detector, app and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash. |
+| macOS | GitHub Actions passed native tests, `go vet`, the race detector, universal GUI bundle and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash. |
 
-- **Freezes instead of killing.** The network changes, the protected apps are paused (`SIGSTOP` / `NtSuspendProcess`). Same IP - you won't notice. An allowed IP is back within 20 s - the app continues where it was.
-- **Closes them if the IP doesn't come back**: politely first so they can save, then by force. While the IP isn't allowed they can't be started again.
-- **Allow IPs, subnets or whole countries** - VPNs rotate addresses within a country all the time.
-- **Your IP and country always in sight**: flag and IP in the macOS menu bar, a country-code badge in the Windows tray, coloured by state.
-- **Presets**: Claude, ChatGPT, Codex, Cursor, Windsurf, GitHub Copilot, Gemini CLI, Perplexity, Telegram, Discord, Slack, Zoom, plus any app of your own.
-- **IPv6 leaks**: many VPNs tunnel only IPv4; Kordon checks both addresses.
-- **Whole process trees**: everything the app started (MCP servers, `curl`, `git` under Claude Code) is frozen too.
-- **Two independent services must agree** on the IP; any disagreement counts as a possible leak.
-- **Instant reaction** to OS network events, and a supervisor that restarts Kordon if it ever crashes.
-- **Proxy-mode VPN clients** (v2rayN, Hiddify, Clash) are handled: the IP is checked through the system proxy, the way your apps see it.
-- **One-click updates**: a new release shows up as "Update to …" in the menu; Kordon downloads it, checks its SHA-256 and restarts. Nothing is installed without your click.
-- Pause, event history, a screen-sharing mode that hides the IP, hot-reloaded `config.yaml`.
-- No admin rights, no telemetry, open source.
+[CI on all three OSes](https://github.com/avazar/zaslon/actions/workflows/ci.yml)
+checks tests, builds, and package contents. It does not validate GUI interaction
+in a user session or recovery using the packaged Unix binaries.
+DNS/IPv6 during actual VPN loss, sleep/wake, WSL, and power loss require
+separate testing. Windows network tests used dedicated test processes;
+see [coverage and limitations (Russian)](docs/NETWORK-CHECKS.md#проверки).
 
-## Install
+## How protection works
 
-macOS / Linux:
+1. Zaslon subscribes to system notifications about IPv4/IPv6 interface, address,
+   and route changes. It also checks processes and interface state every 500 ms.
+2. A relevant or unknown network event invalidates the previous check and suspends selected processes.
+   Route changes count even when adapter addresses stay the same.
+3. A fresh public IP check is evaluated against shared or per-app rules. A stale
+   response cannot automatically resume processes after a network change.
+4. A successful result releases Zaslon's own suspension. A disallowed IP, failed
+   required check, or network subscription error keeps apps suspended without a
+   deadline. Apps are never terminated automatically.
+   Unavailable results may be explicitly ignored in settings; this exception
+   does not override a received disallowed IP or a subscription error.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ef1m03/kordon/main/scripts/install.sh | sh
-```
+On Windows, local IPv6 notifications from a confirmed Teredo interface without
+an external address or route can be filtered without suspension. Unknown events
+and changes to VPNs, ordinary adapters or external routes still suspend first.
+See [network diagnostics](docs/NETWORK-CHECKS.md#отбор-сетевых-уведомлений-windows).
 
-Windows (PowerShell):
+Without relevant network events, the public IP is checked every 5 seconds by default.
+These periodic checks do not suspend running apps in advance: suspension follows
+an unsuccessful result.
 
-```powershell
-irm https://raw.githubusercontent.com/ef1m03/kordon/main/scripts/install.ps1 | iex
-```
+A suspended window may become unresponsive. Long pauses can cause timeouts,
+broken connections, and requests that need to be retried; preservation of unsaved
+work is not guaranteed. Manually pausing protection or quitting Zaslon normally
+releases its confirmed suspensions, allowing apps to use the current network again.
 
-Or grab the files from the [latest release](https://github.com/ef1m03/kordon/releases/latest). The builds aren't notarized/signed (that's paid), so the first manual launch needs *right click → Open* on macOS (*System Settings → Privacy & Security → Open Anyway* on macOS 15+) or *More info → Run anyway* on Windows. The install scripts avoid that.
+## Apps, descendants, and updates
 
-On first start Kordon **allows the current IP**, so install it with your VPN on. Claude is protected by default; pick other apps in the *Protected apps* menu.
+Presets cover Claude, ChatGPT, Codex, Cursor, and other programs. Custom rules can
+match executable names and path substrings. Detected descendants of a matching
+process are included regardless of their names. New processes are found by
+polling, rather than intercepted before they start running.
 
-## Settings
+Matching a name or stable path component avoids tying a rule to one version's
+installation folder, so a rule can survive updates. Changes to names, installation
+methods, or process structure need separate verification. Broad rules can also
+match unrelated programs.
 
-`config.yaml` lives in `~/Library/Application Support/Kordon/` (macOS), `%APPDATA%\Kordon\` (Windows) or `~/.config/kordon/` (Linux). It is commented and reloaded on save.
+On Windows, Zaslon reads command lines for Node, Bun, Python/Python3 and Deno
+to support custom `args:` rules. The Claude and Codex presets also recognise
+Node/Bun launches by the entry script path:
+`@anthropic-ai/claude-code/cli.js` and `@openai/codex/bin/codex.js`.
+Direct launches and `bun run`, spaces, Unicode and both path separators are supported.
+Version directories may change as long as this path within the package stays the same.
+A package mentioned in a prompt, `--eval` or another script's arguments does not
+activate a built-in rule. Native `claude.exe`/`codex.exe` are matched by name.
+
+Unknown launch-option forms, `package.json` aliases and command lines hidden by the
+OS can prevent recognition; Zaslon does not automatically target every Node/Bun process.
+Check that the intended process appears in the panel; custom rules are available
+for unusual launches. `args:` still searches the entire command line for a substring,
+so choose a sufficiently specific marker. Full command lines are not stored in the
+recovery journal. Descendants of a recognised process are included through the process
+tree. Protection of services, WSL, containers, and processes created
+through a separate broker has not been validated. Elevated processes may require
+matching privileges to suspend. If the OS refuses suspension, the process may
+keep running; the error is displayed in the UI.
+
+## Network check rules
+
+- **IPs, subnets, and countries.** A match with an allowed IP/subnet or country is
+  sufficient. Allowing a country is broader than allowing a VPN address and does
+  not prove tunnel use. An empty list permits no exit; the current IP is not added
+  automatically. `app_rules` replaces the shared allow-list for a particular app.
+- **IP confirmation.** Two matching IP-service responses are required by default.
+  The check waits for all requests within a shared timeout (4 seconds), even after
+  two responses agree. Any received disagreement keeps apps suspended. Unavailable
+  services do not vote; responses beyond the timeout are unknown. A cancelled
+  check does not return partial success.
+- **IPv6.** Checked separately and enabled by default. A disallowed public IPv6
+  keeps apps suspended. If the public check fails while an active interface has an
+  IPv6 address other than loopback or link-local, the result is uncertain. This
+  can cause extra pauses even without a working IPv6 route.
+  Conflicting IPv6 responses always keep apps suspended.
+- **DNS.** The default `dns_check: warn` compares the detected resolver's country
+  with the exit country and allowed countries. `block` can suspend apps; `off`
+  disables this check. This is a heuristic: it neither proves the route of DNS
+  queries nor detects every leak.
+- **Proxies.** IP checks use supported system proxy settings. PAC is not supported.
+  An app may use its own proxy or a different route, so its exit may differ from
+  the one measured by Zaslon.
+- **Trusted networks.** An explicitly added network is recognised by the gateway
+  MAC address. After a successful IP request, it bypasses allow-list, confirmation
+  count, IPv6, and DNS checks. This is a protection exception, not proof of a VPN
+  or authenticated network identity. Leave the list empty when only an allowed
+  exit should be accepted.
+
+## When checks are unavailable
+
+The panel's **Settings → Protection** section has two independent choices:
+
+| Situation | Setting | Default |
+|---|---|---|
+| No IP result: offline or an unavailable checker/app domain | If the IP check is unavailable | Suspend apps |
+| IPv6 is possible, but its public exit could not be checked | If IPv6 cannot be checked | Suspend apps |
+
+Each can be set to **Continue with a warning**. Apps and descendants can then run
+without that unavailable confirmation. Checks continue, and the panel and tray
+show a warning rather than verified protection. Received disallowed addresses,
+conflicting responses, insufficient quorum, and blocking DNS rules still suspend
+apps. Network events still suspend first and require a new check to complete.
+
+An explicit policy for a VPN that blocks IPv6:
 
 ```yaml
-apps: ["claude", "cursor"]
-custom_apps:
-  - name: "My client"
-    match: ["/MyClient.app/", "myclient.exe", "args:my-tool/cli.js"]
-allow:
-  ips: ["64.137.54.87", "185.12.40.0/24"]
-  countries: ["NL", "DE"]
-grace: 20s
-close_timeout: 5s
-check_interval: 5s
-min_agree: 2
 check_ipv6: true
-menubar: ip   # ip, country or icon
+ip_unavailable_action: suspend
+ipv6_unavailable_action: ignore
 ```
 
-CLI: `kordon panel`, `kordon status`, `kordon allow [IP|subnet|CC]`, `kordon config`, `kordon autostart on|off`, `kordon update`, `kordon headless`.
+Unlike `check_ipv6: false`, this keeps measuring IPv6: a received disallowed exit
+suspends apps again. Missing responses do not prove the absence of leaks;
+`ignore` reduces verification. These settings do not disable system IPv6 or
+change VPN, routes, or firewall settings.
 
-## What goes over the network
+## IP checks on AI service domains
 
-Only two kinds of requests: the public IP (`api.ipify.org`, `ipv4.icanhazip.com`, `v4.ident.me`, `checkip.amazonaws.com`, `ipinfo.io/ip`; IPv6: `api6.ipify.org`, `ipv6.icanhazip.com`, `v6.ident.me`; all configurable) and its country (`ipinfo.io`, falling back to `ipapi.co` and `api.country.is`, cached). Plus, once a day, one request to `api.github.com` for the latest version number (`update_check: false` turns it off). No analytics.
+For split routing, domain checks can be enabled **separately for each app**.
+On the Apps page, open the app's **Settings**. The expanded block contains its
+permissions, a separate domain-check switch, and an **Edit domains** button.
+Lists for Claude, ChatGPT, Codex, and Perplexity are prefilled;
+switches are off in new profiles. Lists can be prepared before app protection
+is enabled. Turning checks off retains the list; saving a list does not turn
+checks on. An empty list cannot be enabled. Previously active checks are
+preserved when legacy configuration is migrated.
 
-## How safe is it
+**Shared permissions** use the IPs, subnets and countries from the Allowed page.
+**App permissions** replace them for that app; selecting this mode initially
+copies the shared list. Permissions apply to both general and domain IP results.
+Changing the permission source does not change the domain list or its switch.
 
-Covered: IPv6 leaks, child processes, a single lying IP service, missed network changes, Kordon crashing, tampered downloads (installers check SHA-256; every build carries a GitHub attestation: `gh attestation verify <file> --repo ef1m03/kordon`).
+Example for apps already selected for protection:
 
-Not covered, honestly: Kordon works at the app level, not the network level - there are milliseconds between a network change and the freeze, so use your VPN's own kill switch too if you need "not a single packet". Admin processes and services aren't touched. Malware on the same machine can just stop Kordon. PAC proxy scripts aren't supported. On Windows, npm-installed Claude Code started from a terminal runs as `node.exe` - use the native installer.
+```yaml
+domain_checks:
+  claude: [claude.ai, api.anthropic.com]
+  codex: [chatgpt.com, api.openai.com]
+domain_checks_enabled:
+  claude: true
+  codex: true
+```
 
-## Build
+By default, every mandatory domain must see an IP allowed by that app's rules. General IP
+services become diagnostic and cannot replace a failed service check. Errors,
+403 responses, redirects, or disallowed exits hold that app and its descendants.
+Unavailable results follow the policies above; received disallowed exits always block.
+A child that also matches another app must satisfy both sets of policies; there
+is still one owned suspension and recovery record. Detected descendants remain
+protected after their parent exits.
 
-```bash
+Measurements run every 15 seconds; previous success remains usable for at most
+30 seconds without a network event. Network/settings changes or unpausing discard
+previous results and require a fresh check before resuming. The panel shows the
+domain, IPv4/IPv6, time, and errors in a table. Turning the switch off restores
+general IP checks and retains the domain list for later use.
+
+When a required domain check times out, one immediate extra check starts after
+the app and its descendants have been suspended. Processes remain suspended until
+a current success for every required domain permits resumption. A failed retry
+keeps the hold and the normal 15-second cadence; retries do not form a fast loop.
+A verified success or network/settings invalidation rearms this extra attempt.
+Explicit continue-with-warning failure policies retain their meaning.
+
+**The measurement observes Zaslon's connection to a Cloudflare diagnostic endpoint
+on the service domain.** An app's own proxy, per-process/URL VPN rules, another API
+base URL, or additional domains may use a different route. This is not tied to
+the app's session and cannot prove the route of every request. Endpoint availability
+may change, resulting in an uncertain check.
+[Details, limitations, and the end-to-end test (Russian)](docs/NETWORK-CHECKS.md).
+
+## Build from source
+
+### Windows
+
+Requires Go **1.26.5** as specified in `go.mod` and PowerShell **5.1 or later**.
+From the repository root:
+
+```powershell
+.\scripts\Dev.ps1 -Task Check
+```
+
+This runs `go vet`, tests, builds the app and recovery helper, and runs only the
+version command. To rebuild without tests:
+
+```powershell
+.\scripts\Dev.ps1 -Task Build
+```
+
+Outputs: `build/dev/zaslon.exe` and `build/dev/zaslon-recover.exe`.
+These commands do not start protection, enable autostart, or change network
+settings. Tests use their own processes and local servers. The first build
+downloads dependencies and the pinned `go-winres` tool. With a populated cache,
+building with access to Go proxy/sumdb disabled has been verified.
+
+Use `-GoExe` and `-ModuleCache` to supply explicit Go and module cache paths.
+The build version comes from `VERSION` (currently `0.3.0`) and is included in both
+EXEs and their Windows properties. Pass `-Version dev` for an unversioned build.
+
+### Linux and macOS
+
+On Linux, with the same Go version:
+
+```sh
 go test ./...
-./scripts/build-mac.sh        # dist/Kordon.app
-./scripts/build-windows.sh    # dist/kordon-windows-*.exe
-CGO_ENABLED=0 go build ./cmd/kordon
+bash ./scripts/build-linux.sh
 ```
 
----
+Building the macOS GUI requires macOS and Xcode build tools. The script uses CGO,
+WebKit, and system packaging tools:
 
-<p align="center">By <a href="https://github.com/ef1m03">ef1m03</a>. Made at <a href="https://efimovdev.ru"><b>Efimov Dev</b></a>. MIT license.</p>
+```sh
+go test ./...
+./scripts/build-mac.sh
+```
+
+The scripts produce complete archives with the recovery helper, license,
+instructions and checksums. On macOS the helper is inside `Zaslon.app/Contents/MacOS`.
+Versions come from `VERSION`. Verify an archive and run native version commands with:
+
+```sh
+go run ./tools/package -verify dist/ARCHIVE-NAME -smoke
+```
+
+CI verifies the packages and uploads them as artifacts. Linux process control requires
+kernel 5.3+ with available `pidfd_open`/`pidfd_send_signal`.
+Packaging does not establish real VPN failure or Unix desktop-session coverage.
+
+## Configuration and startup
+
+`config.yaml` is stored in the profile directory:
+
+| OS | Default directory |
+|---|---|
+| Windows | `%APPDATA%\Zaslon` |
+| macOS | `~/Library/Application Support/Zaslon` |
+| Linux | `$XDG_CONFIG_HOME/zaslon`, usually `~/.config/zaslon` |
+
+`ZASLON_DIR` selects another directory. It separates configuration files but
+**does not isolate protected processes**: rules can still affect real apps.
+
+New profiles have no selected apps. Configure allowed IPs/countries, then enable
+the apps you want to protect. Existing explicit app selections are preserved. A first
+start with a new default profile also attempts to enable autostart. Setting
+`ZASLON_DIR` prevents this automatic autostart setup.
+If reading or parsing the configuration fails, Zaslon warns and uses the defaults.
+
+Example `config.yaml` fragment for a custom app:
+
+```yaml
+apps: []
+custom_apps:
+  - name: Example client
+    match: [example-client.exe]
+allow:
+  ips: []
+  countries: []
+trusted_networks: []
+```
+
+This example deliberately permits no exit. Choose a known allowed IP, subnet, or
+country deliberately; do not allow the current address merely to release a pause.
+Settings can be edited through the local panel or file; file changes are reloaded
+while running.
+
+Starting without arguments launches the tray/menu-bar app; `headless` starts
+protection without the tray. `version` and `config` print the version and config
+path. `panel` opens the running instance's panel. `status` makes fresh external
+IP and geolocation requests, rather than just reading local state. `allow` changes
+the allow-list; without an argument it adds the current exit. `autostart on|off`
+changes autostart. For help, run `zaslon help`.
+
+On Windows and macOS, reopening the panel activates its existing window.
+The panel closes when Zaslon exits or its connection to the main process ends;
+closing the panel itself keeps protection running. On Linux the panel opens
+in a browser tab managed by the user.
+On Windows the panel uses its own `Zaslon.Panel` application ID and Zaslon icon,
+so its taskbar group is separate from Edge and other applications.
+
+## Recovery after a crash
+
+Zaslon records its process operations in `process-recovery.json`, checking both
+PID and process creation time. On restart, including a supervisor restart after
+a crash, confirmed suspensions are adopted without a preliminary resume or an
+additional suspension count. Recorded descendant policies are retained, including
+orphans. Fresh checks then run; resumption requires a permitted result under every
+applicable policy. Until that first confirmation, continue-with-warning policies
+do not release adopted holds. Ordinary failure policies apply after confirmation.
+
+This startup requires an existing valid `config.yaml` with the recorded apps still
+enabled. Ambiguous operations, inaccessible identities, a corrupt journal or missing
+policies stop automatic protection recovery and preserve information for inspection.
+Apps are never terminated automatically.
+
+**Emergency release is a separate action that ends protection:**
+
+1. Stop Zaslon for the affected profile, including its supervisor that restarts
+   the main process. The helper refuses to operate while the profile is in use.
+2. Inspect entries with the standalone helper. For the development profile, from
+   the repository root:
+
+   ```powershell
+   .\build\dev\zaslon-recover.exe -dir .\build\dev\zaslon-profile
+   ```
+
+3. To explicitly release confirmed suspensions without checking the network:
+
+   ```powershell
+   .\build\dev\zaslon-recover.exe -dir .\build\dev\zaslon-profile -resume
+   ```
+
+`-dir` must point to the profile used at the time of the crash.
+**Resumed apps can use the current network.** The helper does not depend on
+`config.yaml`, the GUI, or internet access, and does not change network settings.
+It is not a firewall or DHCP repair tool.
+
+A crash between an OS operation and recording its result can leave an uncertain
+entry, which is not blindly resumed. A corrupt journal is also preserved without
+automatic recovery. `-terminate` force-terminates every remaining recorded process,
+including confirmed entries; unsaved data is lost. If recovery fails, keep the
+journal and error message. Do not delete the journal or restart protection
+before resolving the unfinished operations.
+
+On Windows, recovery releases Zaslon's own suspension count. Unix processes that are
+already stopped are rejected and never entered in Zaslon's recovery journal.
+`SIGSTOP`/`SIGCONT` do not distinguish owners: an external stop applied concurrently
+or later may still be released by a resume. Linux signals use a process-bound
+`pidfd`; unavailable APIs produce an error without a PID-only fallback.
+macOS rechecks identity before each signal, but a check-to-signal race remains.
+Windows tests do not establish equivalent behaviour on Linux/macOS.
+
+## Network requests and data
+
+No account, Telegram login, or cloud synchronisation is required. Telemetry is
+not implemented. Network checks use external services:
+
+| Purpose | Default services |
+|---|---|
+| Public IPv4 | `api.ipify.org`, `ipv4.icanhazip.com`, `v4.ident.me`, `checkip.amazonaws.com`, `ipinfo.io/ip` |
+| Public IPv6 | `api6.ipify.org`, `ipv6.icanhazip.com`, `v6.ident.me` |
+| IP country | `ipinfo.io`, `ipapi.co`, `api.country.is` |
+| DNS check | System DNS lookup of `whoami.akamai.net` |
+| App domains, when enabled | HTTPS `/cdn-cgi/trace` on configured domains; no account or model requests |
+
+IP services see the connecting address; geolocation services receive the queried
+IP in the URL. IP-service lists are configurable. Configuration, event logs,
+statistics, and the recovery journal are stored locally. The panel is served on
+a loopback address. “Report a problem” opens a GitHub form with the version, OS,
+and a log excerpt. IP/MAC masking is applied, but review the content before
+submitting. Filing an issue requires a separate user action.
+
+## License and attribution
+
+Zaslon source code is distributed under the [MIT License](LICENSE).
+The project is based on Kordon v1.2.1; [that version's license](https://github.com/ef1m03/kordon/blob/v1.2.1/LICENSE)
+credits © 2026 ef1m03 (Efimov Dev). The original copyright notice and full license
+text are preserved in `LICENSE`. The Kordon link provides attribution and does
+not imply endorsement or maintenance of Zaslon by the original project's author.
+
+MIT permits use, modification, and distribution subject to its conditions,
+including preserving the copyright and permission notices. The software is
+provided without warranty; see `LICENSE` for the exact terms and disclaimer.
+Third-party dependencies are distributed under their respective licenses.
+When distributing builds, include `LICENSE` and the required notices for
+third-party dependencies.
+
+Bugs and suggestions: [Zaslon Issues](https://github.com/avazar/zaslon/issues).

@@ -40,7 +40,7 @@ func firstLang(out string) string {
 	return ""
 }
 
-const agentLabel = "dev.efimov.kordon"
+const agentLabel = "io.github.avazar.zaslon"
 
 func agentPath() string {
 	home, _ := os.UserHomeDir()
@@ -52,7 +52,7 @@ func AutostartEnabled() bool {
 	return err == nil
 }
 
-// SetAutostart writes a LaunchAgent that starts Kordon at login and restarts it
+// SetAutostart writes a LaunchAgent that starts Zaslon at login and restarts it
 // after a crash (but not after "Quit", which exits with 0).
 func SetAutostart(on bool) error {
 	if !on {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ef1m03/kordon/internal/config"
+	"github.com/avazar/zaslon/internal/config"
 )
 
 func TestRuleMatch(t *testing.T) {
@@ -72,6 +72,7 @@ func TestPresetsComplete(t *testing.T) {
 
 func TestFilterIncludesChildren(t *testing.T) {
 	cfg := config.Default()
+	cfg.Apps = []string{"claude"}
 	all := []Proc{
 		{PID: 10, PPID: 1, Name: "Claude", Path: "/Applications/Claude.app/Contents/MacOS/Claude"},
 		{PID: 20, PPID: 10, Name: "claude"},

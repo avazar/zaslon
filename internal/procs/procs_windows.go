@@ -2,6 +2,9 @@ package procs
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -24,8 +27,9 @@ const (
 )
 
 type cached struct {
-	created int64
-	path    string
+	created            int64
+	path, args, script string
+	argsRead           bool
 }
 
 type osController struct {
@@ -54,14 +58,10 @@ func (c *osController) List() ([]Proc, error) {
 			continue
 		}
 		seen[pid] = true
-		name := windows.UTF16ToString(e.ExeFile[:])
-		created := creationTime(pid)
-		ce, ok := c.cache[pid]
-		if !ok || ce.created != created {
-			ce = cached{created: created, path: imagePath(pid)}
-			c.cache[pid] = ce
-		}
-		out = append(out, Proc{PID: pid, PPID: int(e.ParentProcessID), Name: name, Path: ce.path})
+		out = append(out, c.processInfo(e))
+	}
+	if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+		return nil, err
 	}
 	for pid := range c.cache {
 		if !seen[pid] {
@@ -71,47 +71,79 @@ func (c *osController) List() ([]Proc, error) {
 	return out, nil
 }
 
-func creationTime(pid int) int64 {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+// Identity, image path and command line come from one handle, so a reused PID
+// cannot contribute another process's arguments to the cached identity.
+func (c *osController) processInfo(e windows.ProcessEntry32) Proc {
+	p := Proc{PID: int(e.ProcessID), PPID: int(e.ParentProcessID), Name: windows.UTF16ToString(e.ExeFile[:])}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, e.ProcessID)
 	if err != nil {
-		return 0
+		delete(c.cache, p.PID)
+		return p
 	}
 	defer windows.CloseHandle(h)
-	var c, x, k, u windows.Filetime
-	if windows.GetProcessTimes(h, &c, &x, &k, &u) != nil {
-		return 0
+	var born, exited, kernel, user windows.Filetime
+	if windows.GetProcessTimes(h, &born, &exited, &kernel, &user) != nil || born.Nanoseconds() == 0 {
+		delete(c.cache, p.PID)
+		return p
 	}
-	return c.Nanoseconds()
+	created := born.Nanoseconds()
+	p.Created = strconv.FormatInt(created, 10)
+	ce, ok := c.cache[p.PID]
+	if !ok || ce.created != created {
+		ce = cached{created: created}
+	}
+	if ce.path == "" {
+		buf := make([]uint16, windows.MAX_LONG_PATH)
+		n := uint32(len(buf))
+		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil {
+			ce.path = windows.UTF16ToString(buf[:n])
+		}
+	}
+	p.Path = ce.path
+	if p.Path != "" {
+		p.Name = filepath.Base(p.Path)
+	}
+	if isInterpreter(p.Name) {
+		if !ce.argsRead {
+			// A denied/early query stays retryable. Never guess that every node/bun
+			// process belongs to a protected CLI when its command line is hidden.
+			if args, err := queryProcessCommandLine(h); err == nil {
+				ce.args, ce.script, ce.argsRead = args, windowsInterpreterScript(p.Name, args), args != ""
+			}
+		}
+		p.Args, p.ScriptPath = ce.args, ce.script
+	}
+	c.cache[p.PID] = ce
+	return p
 }
 
-func imagePath(pid int) string {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return ""
+func withHandle(p Proc, access uint32, fn func(windows.Handle) error) error {
+	if p.Created == "" || p.PID <= 0 {
+		return errors.Join(ErrNotApplied, errors.New("missing process identity"))
 	}
-	defer windows.CloseHandle(h)
-	buf := make([]uint16, windows.MAX_LONG_PATH)
-	n := uint32(len(buf))
-	if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) != nil {
-		return ""
-	}
-	return windows.UTF16ToString(buf[:n])
-}
-
-func withHandle(pid int, access uint32, fn func(windows.Handle) error) error {
-	h, err := windows.OpenProcess(access, false, uint32(pid))
+	h, err := windows.OpenProcess(access|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(p.PID))
 	if err != nil {
 		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil // already gone
 		}
-		return err
+		return errors.Join(ErrNotApplied, err)
 	}
 	defer windows.CloseHandle(h)
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return errors.Join(ErrNotApplied, err)
+	}
+	if strconv.FormatInt(created.Nanoseconds(), 10) != p.Created {
+		return nil
+	} // original process is gone
 	return fn(h)
 }
 
-func ntCall(proc *windows.LazyProc, pid int) error {
-	return withHandle(pid, processSuspendResume, func(h windows.Handle) error {
+func ntCall(proc *windows.LazyProc, p Proc) error {
+	return withHandle(p, processSuspendResume, func(h windows.Handle) error {
+		if err := proc.Find(); err != nil {
+			return errors.Join(ErrNotApplied, fmt.Errorf("process control API: %w", err))
+		}
 		if st, _, _ := proc.Call(uintptr(h)); st != 0 {
 			return windows.NTStatus(st)
 		}
@@ -119,11 +151,11 @@ func ntCall(proc *windows.LazyProc, pid int) error {
 	})
 }
 
-func (c *osController) Freeze(p Proc) error { return ntCall(ntSuspendProcess, p.PID) }
-func (c *osController) Resume(p Proc) error { return ntCall(ntResumeProcess, p.PID) }
+func (c *osController) Freeze(p Proc) error { return ntCall(ntSuspendProcess, p) }
+func (c *osController) Resume(p Proc) error { return ntCall(ntResumeProcess, p) }
 
 func (c *osController) Kill(p Proc) error {
-	return withHandle(p.PID, windows.PROCESS_TERMINATE, func(h windows.Handle) error {
+	return withHandle(p, windows.PROCESS_TERMINATE, func(h windows.Handle) error {
 		return windows.TerminateProcess(h, 1)
 	})
 }

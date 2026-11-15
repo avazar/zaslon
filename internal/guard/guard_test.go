@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/config"
-	"github.com/ef1m03/kordon/internal/procs"
+	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/procs"
 )
 
 // fakeProcs records what the guard did to each process.
@@ -42,26 +42,50 @@ func (f *fakeProcs) remove(pid int) {
 var claude = procs.Proc{PID: 100, Name: "Claude", Path: "/Applications/Claude.app/Contents/MacOS/Claude"}
 var other = procs.Proc{PID: 200, Name: "Safari", Path: "/Applications/Safari.app/Contents/MacOS/Safari"}
 
+func TestFreshProfileDoesNotSuspendAnyApp(t *testing.T) {
+	p := newFakeProcs(claude, other)
+	var revision uint64
+	g := New(config.Default(), Deps{Fingerprint: func() string { return "fixture-network" }, NetworkVersion: func() uint64 { return revision }, Procs: p, StartProbe: func(*config.Config, uint64, bool) func() { return nil }})
+	now := time.Now()
+	g.Step(now)
+	revision++
+	g.Step(now.Add(2 * time.Second))
+	if len(p.frozen) != 0 || len(p.closed) != 0 || len(p.killed) != 0 {
+		t.Fatal("fresh profile operated on an unselected app")
+	}
+}
+
 type harness struct {
-	t      *testing.T
-	g      *Guard
-	p      *fakeProcs
-	now    time.Time
-	fp     string
-	probes int
-	saved  *config.Config
-	events []Event
+	t         *testing.T
+	g         *Guard
+	p         *fakeProcs
+	now       time.Time
+	fp        string
+	revision  uint64
+	cancelled int
+	onProbe   func()
+	probes    int
+	saved     *config.Config
+	events    []Event
 }
 
 func newHarness(t *testing.T, allow ...string) *harness {
 	h := &harness{t: t, p: newFakeProcs(claude, other), now: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), fp: "en0=192.168.0.10,utun6=172.19.0.1"}
 	cfg := config.Default()
+	cfg.Apps = []string{"claude"} // Explicit fixture selection; new profiles protect nothing.
 	cfg.Allow.IPs = allow
 	h.g = New(cfg, Deps{
-		Fingerprint: func() string { return h.fp },
-		StartProbe:  func(*config.Config) { h.probes++ },
-		Procs:       h.p,
-		SaveConfig:  func(c *config.Config) error { h.saved = c; return nil },
+		Fingerprint:    func() string { return h.fp },
+		NetworkVersion: func() uint64 { return h.revision },
+		StartProbe: func(_ *config.Config, _ uint64, _ bool) func() {
+			h.probes++
+			if h.onProbe != nil {
+				h.onProbe()
+			}
+			return func() { h.cancelled++ }
+		},
+		Procs:      h.p,
+		SaveConfig: func(c *config.Config) error { h.saved = c; return nil },
 	})
 	h.g.OnChange(func(_ Snapshot, evs []Event) { h.events = append(h.events, evs...) })
 	return h
@@ -69,11 +93,18 @@ func newHarness(t *testing.T, allow ...string) *harness {
 
 func (h *harness) step(d time.Duration) { h.now = h.now.Add(d); h.g.Step(h.now) }
 func (h *harness) probe(ip, cc string) {
-	h.g.HandleProbe(h.now, ProbeResult{IP: ip, Country: cc, Votes: 2})
+	h.probeFull(ProbeResult{IP: ip, Country: cc, Votes: 2})
 }
-func (h *harness) probeFull(r ProbeResult) { h.g.HandleProbe(h.now, r) }
-func (h *harness) offline()                { h.g.HandleProbe(h.now, ProbeResult{Err: errors.New("offline")}) }
-func (h *harness) status() Status          { return h.g.Snapshot(h.now).Status }
+func (h *harness) probeFull(r ProbeResult) {
+	if !h.g.probing {
+		h.g.CheckNow(h.now)
+		h.step(0)
+	}
+	r.ID = h.g.probeID
+	h.g.HandleProbe(h.now, r)
+}
+func (h *harness) offline()       { h.probeFull(ProbeResult{Err: errors.New("offline")}) }
+func (h *harness) status() Status { return h.g.Snapshot(h.now).Status }
 
 func (h *harness) want(s Status) {
 	h.t.Helper()
@@ -91,7 +122,7 @@ func (h *harness) had(k EventKind) bool {
 	return false
 }
 
-func TestFirstRunAllowsCurrentIP(t *testing.T) {
+func TestEmptyAllowListNeverTrustsCurrentIPAutomatically(t *testing.T) {
 	h := newHarness(t)
 	h.step(0)
 	if !h.p.frozen[claude.PID] {
@@ -101,15 +132,9 @@ func TestFirstRunAllowsCurrentIP(t *testing.T) {
 		t.Fatal("unrelated app frozen")
 	}
 	h.probe("64.137.54.87", "NL")
-	h.want(OK)
-	if h.p.frozen[claude.PID] {
-		t.Fatal("claude still frozen after OK")
-	}
-	if h.saved == nil || len(h.saved.Allow.IPs) != 1 || h.saved.Allow.IPs[0] != "64.137.54.87" {
-		t.Fatalf("first IP not saved to config: %+v", h.saved)
-	}
-	if !h.had(EvAutoAllowed) {
-		t.Fatal("no EvAutoAllowed")
+	h.want(Suspect)
+	if !h.p.frozen[claude.PID] || h.saved != nil || h.had(EvAutoAllowed) {
+		t.Fatal("unconfigured network became trusted")
 	}
 }
 
@@ -161,7 +186,7 @@ func TestNetworkBlipWithSameIPIsSilent(t *testing.T) {
 	}
 }
 
-func TestGraceRunsOutThenBlockedThenAutoUnblock(t *testing.T) {
+func TestSuspensionHasNoDeadlineAndNewProcessesAreSuspended(t *testing.T) {
 	h := newHarness(t, "64.137.54.87")
 	h.step(0)
 	h.probe("64.137.54.87", "NL")
@@ -169,36 +194,26 @@ func TestGraceRunsOutThenBlockedThenAutoUnblock(t *testing.T) {
 	h.probe("95.24.1.1", "RU")
 	h.want(Suspect)
 
-	h.step(21 * time.Second)
-	h.want(Blocked)
-	if !h.p.closed[claude.PID] {
-		t.Fatal("claude not asked to close after grace")
+	for _, delay := range []time.Duration{21 * time.Second, time.Hour, 365 * 24 * time.Hour} {
+		h.step(delay)
+		h.want(Suspect)
+		if !h.p.frozen[claude.PID] || len(h.p.killed) != 0 || len(h.p.closed) != 0 {
+			t.Fatal("timed out suspension")
+		}
 	}
-	// Still running after close_timeout: force.
-	h.step(6 * time.Second)
-	if !h.p.killed[claude.PID] {
-		t.Fatal("claude not killed after close_timeout")
-	}
-	h.p.remove(claude.PID)
-	h.step(500 * time.Millisecond)
-
-	// Started again while blocked: killed at once.
+	// Started while the network is unsafe: suspended, with its state intact.
 	relaunched := procs.Proc{PID: 101, Name: "Claude", Path: claude.Path}
 	h.p.procs = append(h.p.procs, relaunched)
 	h.step(500 * time.Millisecond)
-	if !h.p.killed[101] {
-		t.Fatal("relaunch while blocked not killed")
+	if !h.p.frozen[101] || h.p.killed[101] || h.had(EvKilledNew) {
+		t.Fatal("new process not safely suspended")
 	}
-	if !h.had(EvKilledNew) {
-		t.Fatal("no EvKilledNew")
-	}
-	h.p.remove(101)
 
 	h.step(2 * time.Second)
 	h.probe("64.137.54.87", "NL")
 	h.want(OK)
-	if !h.had(EvUnblocked) {
-		t.Fatal("no EvUnblocked")
+	if h.p.frozen[101] || h.p.frozen[claude.PID] {
+		t.Fatal("fresh allowed check did not resume apps")
 	}
 }
 
@@ -236,12 +251,11 @@ func TestOffline(t *testing.T) {
 	h.want(OK)
 }
 
-func TestOfflineIgnoredWhenDisabled(t *testing.T) {
+func TestOfflineKeepsAppsSuspended(t *testing.T) {
 	h := newHarness(t, "64.137.54.87")
-	h.g.cfg.BlockWhenOffline = false
 	h.step(0)
 	h.offline()
-	h.want(OK)
+	h.want(Suspect)
 }
 
 func TestAllowCurrentIPFromMenu(t *testing.T) {
@@ -252,6 +266,8 @@ func TestAllowCurrentIPFromMenu(t *testing.T) {
 	if !h.g.AllowCurrentIP(h.now) {
 		t.Fatal("AllowCurrentIP returned false")
 	}
+	h.want(Suspect)
+	h.probe("5.5.5.5", "DE")
 	h.want(OK)
 	if h.p.frozen[claude.PID] {
 		t.Fatal("still frozen")
@@ -266,6 +282,8 @@ func TestAllowCountryFromMenu(t *testing.T) {
 	h.step(0)
 	h.probe("5.5.5.5", "DE")
 	h.g.AllowCurrentCountry(h.now)
+	h.want(Suspect)
+	h.probe("5.5.5.5", "DE")
 	h.want(OK)
 	if h.saved.Allow.Countries[0] != "DE" {
 		t.Fatal("country not saved")
@@ -352,6 +370,8 @@ func TestConfigEditResumesWithNotice(t *testing.T) {
 	c.Allow.Countries = []string{"DE"}
 	h.events = nil
 	h.g.SetConfig(h.now, c)
+	h.want(Suspect)
+	h.probe("5.5.5.5", "DE")
 	h.want(OK)
 	if h.p.frozen[claude.PID] {
 		t.Fatal("still frozen")
@@ -385,11 +405,15 @@ func TestIPv6Leak(t *testing.T) {
 	h.want(OK)
 }
 
-func TestFirstRunAllowsIPv6Network(t *testing.T) {
+func TestExplicitAllowAddsIPv6Network(t *testing.T) {
 	h := newHarness(t)
 	h.step(0)
 	h.probeFull(ProbeResult{IP: "64.137.54.87", Country: "NL", Votes: 2, IP6: "2a0e:1c80:1:2:aaaa:bbbb:cccc:dddd", Country6: "NL"})
-	h.want(OK)
+	h.want(Suspect)
+	if !h.g.AllowCurrentIP(h.now) {
+		t.Fatal("explicit allow failed")
+	}
+	h.want(Suspect)
 	if got := h.saved.Allow.IPs; len(got) != 2 || got[1] != "2a0e:1c80:1:2::/64" {
 		t.Fatalf("allowed = %v", got)
 	}
@@ -468,6 +492,8 @@ func TestTrustedNetwork(t *testing.T) {
 	if !h.g.TrustCurrentNetwork(h.now, "Дом") {
 		t.Fatal("TrustCurrentNetwork")
 	}
+	h.want(Suspect)
+	h.probeFull(ProbeResult{IP: "95.24.1.1", Country: "RU", Votes: 2, NetID: "aa:bb:cc:dd:ee:ff"})
 	h.want(OK)
 	if h.saved.TrustedNetworks[0].Name != "Дом" || h.g.Snapshot(h.now).Network != "Дом" {
 		t.Fatal("not saved")
@@ -537,6 +563,7 @@ func TestRemovingRuleResumesWithNotice(t *testing.T) {
 	c = h.g.cfg.Clone()
 	delete(c.AppRules, "cursor")
 	h.g.SetConfig(h.now, c)
+	h.probe("64.137.54.87", "NL")
 	if h.p.frozen[cursor.PID] || !h.had(EvResumed) {
 		t.Fatalf("cursor frozen=%v, resumed event=%v", h.p.frozen[cursor.PID], h.had(EvResumed))
 	}

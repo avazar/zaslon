@@ -1,4 +1,4 @@
-// Package update checks GitHub for a newer Kordon and installs it on request.
+// Package update checks GitHub for a newer Zaslon and installs it on request.
 //
 // Nothing is installed silently: the menu offers the update and the user clicks.
 // The downloaded file is checked against the release's SHA256SUMS.txt.
@@ -21,10 +21,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/netwatch"
+	"github.com/avazar/zaslon/internal/netwatch"
 )
 
-const latestURL = "https://api.github.com/repos/ef1m03/kordon/releases/latest"
+const latestURL = "https://api.github.com/repos/avazar/zaslon/releases/latest"
+
+// Enable only after release and recovery packaging have been tested.
+const enabled = false
+
+var ErrDisabled = errors.New("updates are disabled in this development build; build from https://github.com/avazar/zaslon")
 
 // Release is the part of GitHub's release JSON that matters here.
 type Release struct {
@@ -84,16 +89,19 @@ func Newer(current, latest string) bool {
 func AssetName(goos, goarch string) string {
 	switch goos {
 	case "darwin":
-		return "Kordon-macos.zip"
+		return "Zaslon-macos.zip"
 	case "windows":
-		return "kordon-windows-" + goarch + ".exe"
+		return "zaslon-windows-" + goarch + ".exe"
 	}
-	return "kordon-linux-" + goarch + ".tar.gz"
+	return "zaslon-linux-" + goarch + ".tar.gz"
 }
 
 // Latest asks GitHub for the newest release.
 func Latest(ctx context.Context) (Release, error) {
 	var r Release
+	if !enabled {
+		return r, ErrDisabled
+	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", latestURL, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := netwatch.HTTPClient(15 * time.Second).Do(req)
@@ -186,12 +194,15 @@ func fetch(ctx context.Context, r Release, dir string) (string, error) {
 // Install downloads, verifies and puts the new version in place of the running one.
 // It returns a function that starts the new version; call it right before exiting.
 func Install(ctx context.Context, r Release) (restart func() error, err error) {
+	if !enabled {
+		return nil, ErrDisabled
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	dir, err := os.MkdirTemp("", "kordon-update-")
+	dir, err := os.MkdirTemp("", "zaslon-update-")
 	if err != nil {
 		return nil, err
 	}

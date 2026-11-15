@@ -12,6 +12,15 @@ import (
 	"testing"
 )
 
+func TestDevelopmentUpdatePathsAreDisabled(t *testing.T) {
+	if _, err := Latest(context.Background()); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("Latest: %v", err)
+	}
+	if _, err := Install(context.Background(), Release{}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("Install: %v", err)
+	}
+}
+
 func TestNewer(t *testing.T) {
 	cases := []struct {
 		cur, latest string
@@ -35,10 +44,10 @@ func TestNewer(t *testing.T) {
 
 func TestAssetName(t *testing.T) {
 	for _, c := range [][3]string{
-		{"darwin", "arm64", "Kordon-macos.zip"},
-		{"windows", "amd64", "kordon-windows-amd64.exe"},
-		{"windows", "arm64", "kordon-windows-arm64.exe"},
-		{"linux", "amd64", "kordon-linux-amd64.tar.gz"},
+		{"darwin", "arm64", "Zaslon-macos.zip"},
+		{"windows", "amd64", "zaslon-windows-amd64.exe"},
+		{"windows", "arm64", "zaslon-windows-arm64.exe"},
+		{"linux", "amd64", "zaslon-linux-amd64.tar.gz"},
 	} {
 		if got := AssetName(c[0], c[1]); got != c[2] {
 			t.Errorf("%s/%s -> %s", c[0], c[1], got)
@@ -47,11 +56,11 @@ func TestAssetName(t *testing.T) {
 }
 
 func TestSumFor(t *testing.T) {
-	sums := "aaa  Kordon-macos.zip\nBBB  kordon-windows-amd64.exe\nccc *kordon-linux-amd64.tar.gz\n"
-	if sumFor(sums, "kordon-windows-amd64.exe") != "bbb" || sumFor(sums, "kordon-linux-amd64.tar.gz") != "ccc" {
+	sums := "aaa  Zaslon-macos.zip\nBBB  zaslon-windows-amd64.exe\nccc *zaslon-linux-amd64.tar.gz\n"
+	if sumFor(sums, "zaslon-windows-amd64.exe") != "bbb" || sumFor(sums, "zaslon-linux-amd64.tar.gz") != "ccc" {
 		t.Fatal("sum not found")
 	}
-	if sumFor(sums, "Kordon-macos") != "" {
+	if sumFor(sums, "Zaslon-macos") != "" {
 		t.Fatal("partial name matched")
 	}
 }

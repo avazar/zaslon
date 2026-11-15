@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/guard"
+	"github.com/avazar/zaslon/internal/guard"
 )
 
 func TestMask(t *testing.T) {
@@ -22,7 +22,7 @@ func TestMask(t *testing.T) {
 }
 
 func TestStats(t *testing.T) {
-	t.Setenv("KORDON_DIR", t.TempDir())
+	t.Setenv("ZASLON_DIR", t.TempDir())
 	s := LoadStats()
 	day1 := time.Date(2026, 11, 3, 12, 0, 0, 0, time.Local)
 	s.Record(guard.Counters{Freezes: 2, Saves: 1, FrozenSeconds: 10}, day1)

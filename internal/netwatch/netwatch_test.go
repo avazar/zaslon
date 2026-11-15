@@ -3,6 +3,7 @@ package netwatch
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,7 @@ func TestFingerprintFilters(t *testing.T) {
 	addrs := []ifaceAddr{
 		{"en0", "192.168.0.10"},
 		{"utun6", "172.19.0.1"},
-		{"utun0", "fe80::1"},          // IPv6: ignored
+		{"utun0", "fe80::1"},          // link-local: ignored
 		{"bridge100", "192.168.64.1"}, // VM bridge: ignored
 		{"en0", "169.254.3.3"},        // link-local: ignored
 	}
@@ -27,6 +28,32 @@ func TestFingerprintFilters(t *testing.T) {
 	// Order of interfaces doesn't matter.
 	if fingerprintOf([]ifaceAddr{{"a", "1.1.1.1"}, {"b", "2.2.2.2"}}, "linux") != fingerprintOf([]ifaceAddr{{"b", "2.2.2.2"}, {"a", "1.1.1.1"}}, "linux") {
 		t.Fatal("not sorted")
+	}
+}
+
+func TestFingerprintDetectsIPv6OnlyChanges(t *testing.T) {
+	base := []ifaceAddr{{"Ethernet", "192.168.1.5"}, {"VPN", "fd01::1"}}
+	before := fingerprintOf(base, "windows")
+	base[1].ip = "fd01::2"
+	if fingerprintOf(base, "windows") == before {
+		t.Fatal("IPv6 change ignored")
+	}
+	base = append(base, ifaceAddr{"Ethernet", "2001:db8::1"})
+	if fingerprintOf(base, "windows") == before {
+		t.Fatal("global IPv6 address ignored")
+	}
+}
+
+func TestIPv6Possibility(t *testing.T) {
+	for _, s := range []string{"2001:db8::1", "fd00::1"} {
+		if !possibleIPv6(net.ParseIP(s)) {
+			t.Errorf("ignored %s", s)
+		}
+	}
+	for _, s := range []string{"fe80::1", "::1", "::", "ff02::1", "192.168.1.2"} {
+		if possibleIPv6(net.ParseIP(s)) {
+			t.Errorf("unexpected IPv6 candidate: %s", s)
+		}
 	}
 }
 
@@ -69,14 +96,9 @@ func TestParseWinProxy(t *testing.T) {
 	}
 }
 
-func TestPublicIPFirstValidWins(t *testing.T) {
+func TestPublicIPCollectsResponses(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "<html>nope") }))
 	defer bad.Close()
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(2 * time.Second)
-		fmt.Fprint(w, "9.9.9.9")
-	}))
-	defer slow.Close()
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Connection") != "close" && !r.Close {
 			t.Error("keep-alive must be off")
@@ -90,24 +112,20 @@ func TestPublicIPFirstValidWins(t *testing.T) {
 	liar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "95.24.1.1") }))
 	defer liar.Close()
 
-	start := time.Now()
-	r, err := PublicIP(context.Background(), []string{bad.URL, slow.URL, good.URL, good2.URL}, 4*time.Second, false, 2)
+	r, err := publicIP(context.Background(), []string{bad.URL, good.URL, good2.URL}, 4*time.Second, false, nil)
 	if err != nil || r.IP != "64.137.54.87" || !r.Confirmed(2) {
 		t.Fatalf("got %+v %v", r, err)
 	}
-	if time.Since(start) > time.Second {
-		t.Fatal("waited for the slow service")
-	}
 	// One honest service and one disagreeing: not confirmed.
-	r, err = PublicIP(context.Background(), []string{good.URL, liar.URL}, 2*time.Second, false, 2)
+	r, err = publicIP(context.Background(), []string{good.URL, liar.URL}, 2*time.Second, false, nil)
 	if err != nil || r.Confirmed(2) || len(r.Others) != 1 {
 		t.Fatalf("disagreement not reported: %+v %v", r, err)
 	}
 	// IPv4 answers don't count as IPv6.
-	if _, err := PublicIP(context.Background(), []string{good.URL}, time.Second, true, 1); err != ErrOffline {
+	if _, err := publicIP(context.Background(), []string{good.URL}, time.Second, true, nil); err != ErrOffline {
 		t.Fatalf("v4 answer accepted as v6: %v", err)
 	}
-	if _, err := PublicIP(context.Background(), []string{bad.URL}, time.Second, false, 1); err != ErrOffline {
+	if _, err := publicIP(context.Background(), []string{bad.URL}, time.Second, false, nil); err != ErrOffline {
 		t.Fatalf("all bad: %v", err)
 	}
 }

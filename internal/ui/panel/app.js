@@ -1,85 +1,109 @@
 "use strict";
 
-// Kordon panel. Talks to the local Kordon over /api; every value from it is
+// Zaslon panel. Talks to the local Zaslon over /api; every value from it is
 // escaped before it goes into the page (custom app names come from config.yaml).
 
 const L = {
   ru: {
+    o_ip_unavailable: "Если IP не удалось определить", o_ip_unavailable_d: "Нет связи или не отвечает сервис проверки, включая домены приложения. Продолжение разрешает работу без подтверждения разрешённого выхода.",
+    o_ipv6_unavailable: "Если IPv6 не удалось проверить", o_ipv6_unavailable_d: "Например, VPN блокирует IPv6. Проверки продолжатся; полученный запрещённый IPv6 или противоречащие ответы всё равно приостанавливают приложения.",
+    failure_suspend: "Приостанавливать", failure_ignore: "Продолжать с предупреждением", warning_running: "работает с предупреждением",
+    warning_offline: "IP не определён: сбой проигнорирован по настройке", warning_domain_unknown: "IP на домене не подтверждён: сбой проигнорирован по настройке", warning_v6unknown: "IPv6 не подтверждён: сбой проигнорирован по настройке", v6conflict: "Сервисы IPv6 сообщили разные адреса",
+    parent_policy: "Процесс удерживается правилами другого приложения или родителя",
+    domain_title: "IP на доменах приложения", domain_save: "Сохранить", domain_defaults: "Вернуть стандартные",
+    domain_edit: "Редактировать домены", domain_cancel: "Отмена", domain_count: "Доменов", domain_host: "Домен", domain_checked: "Проверено",
+    domain_off: "Проверки доменов выключены. Список сохранён.", domain_app_off: "Проверки начнутся после включения защиты приложения.", domain_required: "Добавьте хотя бы один домен перед включением проверок.",
+    domain_unavailable: "Недоступен", domain_v6_disabled: "Проверка выключена", domain_v6_missing: "Не обнаружен", domain_stale: "Результат устарел",
+    domain_hint: "По одному домену на строку. Сохранение списка не меняет переключатель. Измеряется соединение Zaslon: свой прокси приложения, другой API-адрес или правила VPN по процессам могут дать иной выход.",
+    domain_unknown: "Выход к сервису не подтверждён", domain_ip: "IP сервиса не разрешён", domain_wait: "Ожидается новая проверка", domain_v6_absent: "нет IPv6 у домена или проверка отключена",
+    process_error: "ошибка защиты", ipv6_unknown: "Не удалось проверить IPv6",
     overview: "Обзор", apps: "Приложения", allow: "Разрешено", networks: "Сети", stats: "Статистика",
     history: "История", settings: "Настройки", about: "О программе",
     lead_overview: "Что сейчас с сетью и защищёнными приложениями",
-    lead_apps: "Kordon замораживает выбранные программы, когда сеть или IP не те. У каждой могут быть свои правила.",
+    lead_apps: "Zaslon замораживает выбранные программы, когда сеть или IP не те. У каждой могут быть свои правила.",
     lead_allow: "Где приложениям можно работать. Подходит хоть что-то одно - значит можно.",
     lead_networks: "В доверенных сетях (дом, офис) приложения работают без проверки IP. Сеть узнаётся по её роутеру.",
-    lead_stats: "Сколько раз Kordon вмешивался за последние 14 дней",
+    lead_stats: "Сколько раз Zaslon вмешивался за последние 14 дней",
     lead_history: "Последние события",
     lead_settings: "Изменения сохраняются сразу",
-    ip: "Внешний IP", ipv6: "IPv6", dns: "DNS", network: "Сеть", none: "нет", offline: "нет интернета", checking: "проверяю…",
+    ip: "Общий внешний IP", ipv6: "IPv6", dns: "DNS", network: "Сеть", none: "нет", offline: "IP не определён", checking: "проверяю…",
     ipv6_none: "IPv6 нет или он выключен", dns_ok: "идёт через VPN", dns_leak: "идёт мимо VPN", dns_unknown: "не удалось определить",
     trusted_net: "Доверенная сеть", usual_net: "Обычная сеть", unknown_net: "Роутер не виден",
     trust: "Доверять этой сети", allow_ip: "Разрешить этот IP", allow_country: "Разрешить страну", check: "Проверить",
     pause: "Пауза", pause15: "15 минут", pause60: "1 час", pauseF: "До перезапуска", unpause: "Снять паузу",
     others: "Другие сервисы видят", running: "запущено", not_running: "не запущено", frozen: "заморожено", blocked: "закрыто", ok: "работает",
-    own_rules: "Свои правила", shared_rules: "Общие правила", rule_hint: "Где можно работать именно этому приложению. Пусто - значит общие правила со страницы «Разрешено».",
+    own_rules: "Свои разрешения", shared_rules: "Общие разрешения", rule_hint: "Действуют вместо общих разрешений. Пустой список ничего не разрешает.",
+    permissions_title: "Разрешённые IP и страны", permissions_hint: "Эти IP, подсети и страны применяются и к обычной проверке IP, и к доменам приложения.",
+    rule_source: "Использовать разрешения", shared_rules_hint: "Общий список со страницы «Разрешено». Его изменения применяются ко всем приложениям без собственных правил.", edit_shared_rules: "Открыть общие разрешения",
+    domain_permissions_hint: "Полученные на доменах адреса проверяются по разрешениям из блока выше.",
     remove_rule: "Вернуть общие правила", custom: "Свои приложения", add_custom: "Добавить", custom_name: "Название", custom_match: "Имя файла или часть пути, через запятую",
     remove: "Удалить", ips: "IP и подсети", countries: "Страны", add: "Добавить", ip_ph: "64.137.54.87 или 64.137.54.0/24",
     country_ph: "Начните вводить страну", no_ips: "Нет разрешённых IP", no_countries: "Нет разрешённых стран",
     current_net: "Текущая сеть", router: "Роутер", net_name: "Название, например «Дом»", no_trusted: "Доверенных сетей пока нет",
     here: "вы здесь", rename: "Переименовать",
-    s_saves: "раз VPN вернулся вовремя", s_freezes: "заморозок", s_blocks: "раз закрыл приложения", s_time: "в заморозке всего",
-    legend_saves: "вернулся вовремя", legend_blocks: "закрыто", legend_other: "заморожено", trusted_list: "Доверенные сети", session: "С запуска Kordon",
+    s_saves: "возобновлений", s_freezes: "заморозок", s_blocks: "раз закрыл приложения", s_time: "в заморозке всего",
+    legend_saves: "возобновлено", legend_blocks: "закрыто", legend_other: "заморожено", trusted_list: "Доверенные сети", session: "С запуска Zaslon",
     g_protect: "Защита", g_iface: "Интерфейс", g_system: "Система", g_files: "Файлы и помощь",
-    o_freeze: "Замораживать при смене сети", o_freeze_d: "Пока Kordon проверяет IP, обычно доля секунды",
-    o_offline: "Замораживать без интернета", o_offline_d: "Когда интернет пропал целиком",
     o_ipv6: "Проверять IPv6", o_ipv6_d: "Ловит VPN, которые заворачивают только IPv4",
     o_dns: "Утечка DNS", o_dns_d: "Запросы к сайтам идут мимо VPN", dns_warn: "Предупреждать", dns_block: "Замораживать", dns_off: "Не проверять",
-    o_grace: "Ждать разрешённый IP", o_grace_d: "Потом приложения закрываются", o_close: "Ждать закрытия", o_close_d: "Потом закрыть принудительно",
     o_interval: "Сверять IP раз в", o_interval_d: "Когда всё в порядке", o_agree: "Сервисов должны совпасть", o_agree_d: "Чтобы поверить IP",
     o_menubar: "Рядом со значком", mb_ip: "Страна и IP", mb_country: "Только страна", mb_icon: "Ничего",
     o_lang: "Язык", lang_auto: "Как в системе", o_notify: "Уведомления",
     o_autostart: "Запускать при входе в систему", o_update: "Проверять обновления", o_update_d: "Раз в сутки, ставятся только по клику",
     open_config: "Открыть config.yaml", open_log: "Открыть журнал", report: "Сообщить о проблеме", sec: "с",
     update_avail: "Доступна версия", update_btn: "Обновить", saved: "Сохранено", about_text: "Kill switch для приложений: замораживает выбранные программы, когда отваливается VPN или меняется IP. Открытый код, без телеметрии.",
-    made: "Сделано в Efimov Dev", github: "Kordon на GitHub", license: "Лицензия MIT",
+    github: "Zaslon на GitHub", license: "Лицензия MIT",
     history_empty: "Пока ничего не случилось", paused_until: "Пауза до", paused_forever: "Пауза до перезапуска",
   },
   en: {
+    o_ip_unavailable: "If the IP check is unavailable", o_ip_unavailable_d: "No connection or a failed checker, including app domains. Continuing permits apps without confirmation of the allowed exit.",
+    o_ipv6_unavailable: "If IPv6 cannot be checked", o_ipv6_unavailable_d: "For example, the VPN blocks IPv6. Checks continue; a received disallowed IPv6 or conflicting responses still suspend apps.",
+    failure_suspend: "Suspend apps", failure_ignore: "Continue with a warning", warning_running: "running with a warning",
+    warning_offline: "IP unknown: failure ignored by your setting", warning_domain_unknown: "Service IP unconfirmed: failure ignored by your setting", warning_v6unknown: "IPv6 unconfirmed: failure ignored by your setting", v6conflict: "IPv6 services returned conflicting addresses",
+    parent_policy: "Another matching app or parent policy holds this process",
+    domain_title: "IP seen on app domains", domain_save: "Save", domain_defaults: "Restore defaults",
+    domain_edit: "Edit domains", domain_cancel: "Cancel", domain_count: "Domains", domain_host: "Domain", domain_checked: "Checked",
+    domain_off: "Domain checks are off. Your list is saved.", domain_app_off: "Checks start when protection is enabled for this app.", domain_required: "Add at least one domain before enabling checks.",
+    domain_unavailable: "Unavailable", domain_v6_disabled: "Check disabled", domain_v6_missing: "Not detected", domain_stale: "Result expired",
+    domain_hint: "One domain per line. Saving the list does not change the switch. This measures Zaslon's connection: an app's own proxy, another API address or per-process VPN routing may use a different exit.",
+    domain_unknown: "Service exit not confirmed", domain_ip: "Service IP not allowed", domain_wait: "Waiting for a fresh check", domain_v6_absent: "no service IPv6 or check disabled",
+    process_error: "protection error", ipv6_unknown: "IPv6 check inconclusive",
     overview: "Overview", apps: "Apps", allow: "Allowed", networks: "Networks", stats: "Statistics",
     history: "History", settings: "Settings", about: "About",
     lead_overview: "Your network and protected apps right now",
-    lead_apps: "Kordon freezes the chosen apps when the network or IP isn't right. Each one can have its own rules.",
+    lead_apps: "Zaslon freezes the chosen apps when the network or IP isn't right. Each one can have its own rules.",
     lead_allow: "Where apps may run. Matching any one entry is enough.",
     lead_networks: "On trusted networks (home, office) apps run without the IP check. A network is recognised by its router.",
-    lead_stats: "How often Kordon stepped in over the last 14 days",
+    lead_stats: "How often Zaslon stepped in over the last 14 days",
     lead_history: "Recent events",
     lead_settings: "Changes are saved right away",
-    ip: "Public IP", ipv6: "IPv6", dns: "DNS", network: "Network", none: "none", offline: "no internet", checking: "checking…",
+    ip: "General public IP", ipv6: "IPv6", dns: "DNS", network: "Network", none: "none", offline: "IP unknown", checking: "checking…",
     ipv6_none: "No IPv6, or it's off", dns_ok: "goes through the VPN", dns_leak: "bypasses the VPN", dns_unknown: "couldn't tell",
     trusted_net: "Trusted network", usual_net: "Regular network", unknown_net: "Router not visible",
     trust: "Trust this network", allow_ip: "Allow this IP", allow_country: "Allow country", check: "Check",
     pause: "Pause", pause15: "15 minutes", pause60: "1 hour", pauseF: "Until restart", unpause: "Resume",
     others: "Other services see", running: "running", not_running: "not running", frozen: "frozen", blocked: "closed", ok: "running",
-    own_rules: "Own rules", shared_rules: "Shared rules", rule_hint: "Where this app may run. Empty means the shared rules from the Allowed page.",
+    own_rules: "App permissions", shared_rules: "Shared permissions", rule_hint: "Replace the shared permissions for this app. An empty list permits no exit.",
+    permissions_title: "Allowed IPs and countries", permissions_hint: "These IPs, subnets and countries apply to both the general IP check and this app's domains.",
+    rule_source: "Use permissions", shared_rules_hint: "The shared list from the Allowed page. Changes apply to every app without its own permissions.", edit_shared_rules: "Open shared permissions",
+    domain_permissions_hint: "Addresses seen on these domains are checked against the permissions above.",
     remove_rule: "Use shared rules", custom: "Your apps", add_custom: "Add", custom_name: "Name", custom_match: "File name or part of the path, comma-separated",
     remove: "Remove", ips: "IPs and subnets", countries: "Countries", add: "Add", ip_ph: "64.137.54.87 or 64.137.54.0/24",
     country_ph: "Start typing a country", no_ips: "No allowed IPs", no_countries: "No allowed countries",
     current_net: "Current network", router: "Router", net_name: "Name, e.g. \"Home\"", no_trusted: "No trusted networks yet",
     here: "you're here", rename: "Rename",
-    s_saves: "times the VPN came back in time", s_freezes: "freezes", s_blocks: "times apps were closed", s_time: "spent frozen",
-    legend_saves: "back in time", legend_blocks: "closed", legend_other: "frozen", trusted_list: "Trusted networks", session: "Since Kordon started",
+    s_saves: "resumes", s_freezes: "freezes", s_blocks: "times apps were closed", s_time: "spent frozen",
+    legend_saves: "resumed", legend_blocks: "closed", legend_other: "frozen", trusted_list: "Trusted networks", session: "Since Zaslon started",
     g_protect: "Protection", g_iface: "Interface", g_system: "System", g_files: "Files and help",
-    o_freeze: "Freeze on network change", o_freeze_d: "While Kordon checks the IP, usually a split second",
-    o_offline: "Freeze when offline", o_offline_d: "When the internet is gone entirely",
     o_ipv6: "Check IPv6", o_ipv6_d: "Catches VPNs that tunnel IPv4 only",
     o_dns: "DNS leaks", o_dns_d: "Lookups bypass the VPN", dns_warn: "Warn", dns_block: "Freeze", dns_off: "Don't check",
-    o_grace: "Wait for an allowed IP", o_grace_d: "Then the apps are closed", o_close: "Wait for apps to quit", o_close_d: "Then force them",
     o_interval: "Check the IP every", o_interval_d: "While all is well", o_agree: "Services must agree", o_agree_d: "To trust an IP",
     o_menubar: "Next to the icon", mb_ip: "Country and IP", mb_country: "Country only", mb_icon: "Nothing",
     o_lang: "Language", lang_auto: "System", o_notify: "Notifications",
     o_autostart: "Start at login", o_update: "Check for updates", o_update_d: "Once a day, installed only when you click",
     open_config: "Open config.yaml", open_log: "Open log", report: "Report a problem", sec: "s",
     update_avail: "Version available:", update_btn: "Update", saved: "Saved", about_text: "A kill switch for apps: freezes the apps you choose when the VPN drops or your IP changes. Open source, no telemetry.",
-    made: "Made by Efimov Dev", github: "Kordon on GitHub", license: "MIT license",
+    github: "Zaslon on GitHub", license: "MIT license",
     history_empty: "Nothing has happened yet", paused_until: "Paused until", paused_forever: "Paused until restart",
   },
 };
@@ -97,6 +121,7 @@ const ICONS = {
   snow: '<path d="M12 2v20M4.9 7l14.2 10M4.9 17L19.1 7"/>',
   stop: '<path d="M6 6l12 12M18 6L6 18"/>',
   pause: '<path d="M9 5v14M15 5v14"/>',
+  warning: '<path d="M12 3L2 21h20L12 3zM12 9v5M12 17v1"/>',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -105,7 +130,9 @@ const PAGES = ["overview", "apps", "allow", "networks", "stats", "history", "set
 let S = null; // last state
 let page = (location.hash || "#overview").slice(1);
 let countries = [];
-let openRule = null; // app id whose rule editor is open
+let openAppSettings = null;
+let openDomains = null;
+const domainDrafts = new Map();
 let lastJSON = "";
 const t = (k) => (L[S?.lang] || L.ru)[k] || L.en[k] || k;
 
@@ -158,15 +185,15 @@ function heroActions() {
 }
 
 function heroSub() {
+	if (S.status === "error") return (S.errors || []).map(esc).join("<br>");
   const run = S.apps.filter((a) => a.running).map((a) => esc(a.name));
   if (S.paused) return S.pausedUntil === "forever" ? t("paused_forever") : `${t("paused_until")} ${esc(S.pausedUntil)}`;
-  return run.length ? `${run.join(", ")} · ${S.status === "frozen" ? t("frozen") : S.status === "blocked" ? t("blocked") : t("running")}` : "";
+  const summary = run.length ? `${run.join(", ")} · ${S.status === "frozen" ? t("frozen") : S.status === "blocked" ? t("blocked") : S.status === "warning" ? t("warning_running") : t("running")}` : "";
+  return [summary, ...(S.warnings || []).map((w) => `${(w.apps || []).map(esc).join(", ")}: ${esc(t("warning_" + w.reason))}`)].filter(Boolean).join("<br>");
 }
 
 function overview() {
-  const icon = { ok: "check", frozen: "snow", starting: "snow", blocked: "stop", paused: "pause" }[S.status];
-  const grace = S.settings.grace || 1;
-  const bar = S.status === "frozen" && S.reason !== "net" ? `<div class="bar" style="width:${Math.max(0, (S.graceLeft / grace) * 100)}%"></div>` : "";
+  const icon = { ok: "check", warning: "warning", frozen: "snow", starting: "snow", blocked: "stop", error: "stop", paused: "pause" }[S.status];
   const upd = S.update ? `<div class="banner"><b>${t("update_avail")} ${esc(S.update)}</b><span class="grow"></span><button class="btn primary" data-op="install_update">${t("update_btn")}</button></div>` : "";
   const ipV = S.offline ? t("offline") : S.ip ? esc(S.ip) : t("checking");
   const others = S.others && S.others.length ? `<div class="s">${t("others")}: ${S.others.map(esc).join(", ")}</div>` : "";
@@ -180,11 +207,11 @@ function overview() {
   <div class="card hero ${S.status}">
     <div class="orb">${svg(icon)}</div>
     <div><div class="title">${esc(S.statusText)}</div><div class="sub">${heroSub()}</div></div>
-    <div class="actions">${heroActions()}</div>${bar}
+    <div class="actions">${heroActions()}</div>
   </div>
   <div class="grid">
     <div class="card tile"><div class="k">${t("ip")}</div><div class="v selectable">${ipV}</div><div class="s">${country(S.country)}</div>${others}</div>
-    <div class="card tile ${S.reason === "v6" ? "warn" : ""}"><div class="k">${t("ipv6")}</div><div class="v selectable">${S.ip6 ? esc(S.ip6) : "-"}</div><div class="s">${S.ip6 ? country(S.country6) : t("ipv6_none")}</div></div>
+    <div class="card tile ${S.reason === "v6" || S.ipv6Unknown || S.ipv6Conflicting ? "warn" : ""}"><div class="k">${t("ipv6")}</div><div class="v selectable">${S.ip6 ? esc(S.ip6) : "-"}</div><div class="s">${S.ipv6Conflicting ? t("v6conflict") : S.ip6 ? country(S.country6) : S.ipv6Unknown ? t("ipv6_unknown") : t("ipv6_none")}</div></div>
     ${dnsTile}
     ${netTile}
   </div>
@@ -193,12 +220,19 @@ function overview() {
 }
 
 function ruleEditor(app) {
-  const r = app.rule || { ips: [], countries: [] };
-  return `<div class="rule">
-    <div class="hint">${t("rule_hint")}</div>
-    ${allowEditor(r, app.id)}
-    ${app.rule ? `<button class="btn small" style="margin-top:12px" data-op="remove_rule" data-app="${esc(app.id)}">${t("remove_rule")}</button>` : ""}
-  </div>`;
+  const own = !!app.rule, r = app.rule || S.allow;
+  const shared = `<div class="shared-rule-summary"><div class="k">${t("countries")}</div><div class="chips">${r.countries.length ? r.countries.map((c) => `<span class="chip">${country(c)}</span>`).join("") : `<span class="empty">${t("no_countries")}</span>`}</div>
+    <div class="k">${t("ips")}</div><div class="chips">${r.ips.length ? r.ips.map((ip) => `<span class="chip selectable">${esc(ip)}</span>`).join("") : `<span class="empty">${t("no_ips")}</span>`}</div>
+    <button class="btn small" data-go="allow">${t("edit_shared_rules")}</button></div>`;
+  return `<section class="app-permissions"><h3>${t("permissions_title")}</h3><p class="hint">${t("permissions_hint")}</p>
+    <div class="rule-source"><label for="rule-source-${encodeURIComponent(app.id)}">${t("rule_source")}</label>
+    <select id="rule-source-${encodeURIComponent(app.id)}" data-rule-source="${esc(app.id)}"><option value="shared" ${!own ? "selected" : ""}>${t("shared_rules")}</option><option value="own" ${own ? "selected" : ""}>${t("own_rules")}</option></select></div>
+    <p class="hint">${t(own ? "rule_hint" : "shared_rules_hint")}</p>
+    ${own ? allowEditor(r, app.id) : shared}</section>`;
+}
+
+function appSettings(a) {
+  return `<section class="app-settings" id="app-settings-${encodeURIComponent(a.id)}" aria-labelledby="app-settings-button-${encodeURIComponent(a.id)}">${ruleEditor(a)}${domainSection(a)}</section>`;
 }
 
 // A steady colour per app name, so the list is easy to scan.
@@ -210,17 +244,70 @@ function avatarStyle(name) {
 
 function appRow(a) {
   const st = !a.running ? `<span class="badge">${t("not_running")}</span>`
-    : `<span class="badge ${esc(a.status)}">${a.status === "frozen" ? t("frozen") : a.status === "blocked" ? t("blocked") : t("running")}</span>`;
-  const rules = a.enabled
-    ? `<button class="btn small" data-rule="${esc(a.id)}">${a.rule ? t("own_rules") : t("shared_rules")} ▾</button>` : "";
+    : `<span class="badge ${esc(a.status)}">${a.status === "error" ? t("process_error") : a.status === "frozen" ? t("frozen") : a.status === "blocked" ? t("blocked") : a.status === "warning" ? t("warning_running") : t("running")}</span>`;
+  const expanded = openAppSettings === a.id;
+  const settingsButton = `<button class="btn small" id="app-settings-button-${encodeURIComponent(a.id)}" data-app-settings="${esc(a.id)}" aria-expanded="${expanded}" aria-controls="app-settings-${encodeURIComponent(a.id)}" aria-label="${esc(t("settings") + ": " + a.name)}">${t("settings")} <span aria-hidden="true">${expanded ? "▴" : "▾"}</span></button>`;
   const toggle = a.custom
     ? `<button class="btn small danger" data-op="remove_custom" data-app="${esc(a.id)}">${t("remove")}</button>`
     : `<label class="switch"><input type="checkbox" data-toggle="${esc(a.id)}" ${a.enabled ? "checked" : ""}><span></span></label>`;
   const meta = a.custom ? esc((a.match || []).join(", ")) : (a.enabled ? st : "");
   return `<div class="item"><div class="avatar" style="${avatarStyle(a.name)}">${esc(a.name[0])}</div>
     <div><div class="name">${esc(a.name)}</div><div class="meta">${meta}</div></div>
-    <div class="end">${a.custom ? st : ""}${rules}${toggle}</div></div>
-    ${openRule === a.id && a.enabled ? ruleEditor(a) : ""}`;
+    <div class="end">${a.custom ? st : ""}${settingsButton}${toggle}</div></div>
+    ${expanded ? appSettings(a) : ""}`;
+}
+
+function domainHost(endpoint) {
+  try { return new URL(endpoint).host; } catch (_) { return endpoint; }
+}
+
+function editableDomains(endpoints) {
+  return (endpoints || []).map((s) => s.startsWith("https://") ? domainHost(s) : s).join("\n");
+}
+
+function domainEditor(a) {
+  const draft = domainDrafts.has(a.id) ? domainDrafts.get(a.id) : editableDomains(a.domains);
+  return `<div class="domain-editor"><label for="domains-${encodeURIComponent(a.id)}">${t("domain_edit")}</label>
+    <textarea id="domains-${encodeURIComponent(a.id)}" data-domains="${esc(a.id)}" rows="3" spellcheck="false">${esc(draft)}</textarea>
+    <div class="domain-editor-actions"><button class="btn small primary" data-save-domains="${esc(a.id)}">${t("domain_save")}</button>
+    <button class="btn small" data-cancel-domains="${esc(a.id)}">${t("domain_cancel")}</button>
+    ${(a.defaultDomains || []).length ? `<button class="btn small" data-default-domains="${esc(a.id)}">${t("domain_defaults")}</button>` : ""}</div>
+    <p class="hint">${t("domain_hint")}</p></div>`;
+}
+
+function domainSection(a) {
+  const on = a.domainChecksEnabled;
+  const hint = on && !a.enabled ? t("domain_app_off") : !on ? t("domain_off") : "";
+  return `<section class="domain-section" aria-label="${esc(t("domain_title") + ": " + a.name)}">
+    <div class="domain-controls"><div><div class="domain-heading">${t("domain_title")}</div><div class="domain-meta">${t("domain_count")}: ${(a.domains || []).length}</div></div>
+    <div class="domain-actions"><button class="btn small" data-edit-domains="${esc(a.id)}" aria-expanded="${openDomains === a.id}">${t("domain_edit")}</button>
+    <label class="switch"><input type="checkbox" data-domain-toggle="${esc(a.id)}" aria-label="${esc(t("domain_title") + ": " + a.name)}" ${on ? "checked" : ""}><span></span></label></div></div>
+    <p class="hint">${t("domain_permissions_hint")}</p>
+    ${hint ? `<div class="hint">${hint}</div>` : ""}
+    ${openDomains === a.id ? domainEditor(a) : ""}
+    ${on && a.enabled ? domainResults(a) : ""}</section>`;
+}
+
+function domainResults(a) {
+  const results = a.measurements || [];
+  const cell = (d, v6) => {
+    if (v6 && !S.settings.check_ipv6) return `<span class="measurement-muted">${t("domain_v6_disabled")}</span>`;
+    if (!d) return `<span class="measurement-muted">${t("domain_wait")}</span>`;
+    const error = v6 ? d.ipv6Error : d.error, ip = v6 ? d.ip6 : d.ip, cc = v6 ? d.country6 : d.country;
+    if (error) return `<span class="measurement-error" title="${esc(error)}">${t("domain_unavailable")}</span>`;
+    if (!ip) return `<span class="measurement-muted">${v6 ? t("domain_v6_missing") : "—"}</span>`;
+    return `<code class="selectable">${esc(ip)}</code>${cc ? `<span class="measurement-country">${esc(cc)}</span>` : ""}`;
+  };
+  return `${["domain_unknown", "domain_ip", "parent_policy"].includes(a.reason) ? `<div class="hint">${t(a.reason)}</div>` : ""}
+    <div class="domain-table-wrap" tabindex="0" role="region" aria-label="${esc(t("domain_title") + ": " + a.name)}"><table class="domain-table">
+    <colgroup><col class="domain-col-host"><col class="domain-col-ip"><col class="domain-col-ip"><col class="domain-col-time"></colgroup>
+    <thead><tr><th scope="col">${t("domain_host")}</th><th scope="col">IPv4</th><th scope="col">IPv6</th><th scope="col">${t("domain_checked")}</th></tr></thead><tbody>
+    ${(a.domains || []).map((endpoint) => {
+      const d = results.find((x) => x.endpoint === endpoint), date = new Date(d?.checkedAt);
+      const validDate = Number.isFinite(date.getTime()), stale = validDate && Date.now() - date.getTime() >= 30000;
+      return `<tr class="${stale ? "measurement-stale" : ""}"><th scope="row" title="${esc(endpoint)}">${esc(domainHost(endpoint))}</th>
+        <td>${cell(d, false)}</td><td>${cell(d, true)}</td><td class="measurement-time">${validDate ? `<time datetime="${esc(date.toISOString())}" title="${esc(stale ? t("domain_stale") : date.toLocaleString())}">${esc(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }))}</time>` : "—"}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
 }
 
 function apps() {
@@ -312,12 +399,10 @@ function selSet(key, title, desc, value, opts) {
 function settings() {
   const s = S.settings;
   return `<h2>${t("g_protect")}</h2><div class="card">
-    ${toggleSet("freeze_on_network_change", t("o_freeze"), t("o_freeze_d"), s.freeze_on_network_change)}
-    ${toggleSet("block_when_offline", t("o_offline"), t("o_offline_d"), s.block_when_offline)}
     ${toggleSet("check_ipv6", t("o_ipv6"), t("o_ipv6_d"), s.check_ipv6)}
+    ${selSet("ip_unavailable_action", t("o_ip_unavailable"), t("o_ip_unavailable_d"), s.ip_unavailable_action, [["suspend", t("failure_suspend")], ["ignore", t("failure_ignore")]])}
+    ${selSet("ipv6_unavailable_action", t("o_ipv6_unavailable"), t("o_ipv6_unavailable_d"), s.ipv6_unavailable_action, [["suspend", t("failure_suspend")], ["ignore", t("failure_ignore")]])}
     ${selSet("dns_check", t("o_dns"), t("o_dns_d"), s.dns_check, [["warn", t("dns_warn")], ["block", t("dns_block")], ["off", t("dns_off")]])}
-    ${numSet("grace", t("o_grace"), t("o_grace_d"), s.grace)}
-    ${numSet("close_timeout", t("o_close"), t("o_close_d"), s.close_timeout)}
     ${numSet("check_interval", t("o_interval"), t("o_interval_d"), s.check_interval)}
     ${numSet("min_agree", t("o_agree"), t("o_agree_d"), s.min_agree, "")}
   </div>
@@ -338,16 +423,16 @@ function settings() {
 }
 
 function about() {
-  return `<div class="card about"><img src="icon.png" alt=""><div class="big">Kordon ${esc(S.version)}</div>
+  return `<div class="card about"><img src="icon.png" alt=""><div class="big">Zaslon ${esc(S.version)}</div>
     <p>${t("about_text")}</p>
-    <div class="links"><button class="btn" data-url="https://github.com/ef1m03/kordon">${t("github")}</button><button class="btn primary" data-url="https://efimovdev.ru">${t("made")}</button></div>
+    <div class="links"><button class="btn" data-url="https://github.com/avazar/zaslon">${t("github")}</button><button class="btn" data-url="https://github.com/avazar/zaslon/blob/dev/LICENSE">${t("license")}</button></div>
     <p style="font-size:12px">${t("license")} · ef1m03</p></div>`;
 }
 
 const RENDER = { overview, apps, allow, networks, stats, history, settings, about };
 
 function nav() {
-  const bad = S.status === "frozen" || S.status === "blocked";
+  const bad = S.status === "frozen" || S.status === "blocked" || S.status === "error" || S.status === "warning";
   document.getElementById("nav").innerHTML = PAGES.map((p) =>
     `<a href="#${p}" class="${p === page ? "on" : ""}">${svg(p)}<span>${t(p)}</span>${p === "overview" && bad ? `<span class="badge ${S.status}">!</span>` : ""}</a>`).join("");
   document.getElementById("ver").textContent = S.version;
@@ -373,9 +458,9 @@ async function refresh(force = false) {
     lastJSON = txt;
     S = JSON.parse(txt);
     const a = document.activeElement;
-    if (!force && a && a.closest("main") && (a.tagName === "INPUT" || a.tagName === "SELECT")) return;
+    if (!force && a && a.closest("main") && ["INPUT", "SELECT", "TEXTAREA"].includes(a.tagName)) return;
     render();
-  } catch (_) { /* Kordon restarting: try again on the next tick */ }
+  } catch (_) { /* Zaslon restarting: try again on the next tick */ }
 }
 
 // ---------- events ----------
@@ -388,12 +473,33 @@ function countryCode(v) {
 }
 
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-op],[data-url],[data-go],[data-rule],[data-addcbtn],[data-addipbtn],[data-rename],#cAdd,#trustBtn");
+  const el = e.target.closest("[data-op],[data-url],[data-go],[data-app-settings],[data-addcbtn],[data-addipbtn],[data-rename],[data-edit-domains],[data-cancel-domains],[data-save-domains],[data-default-domains],#cAdd,#trustBtn");
   if (!el) return;
   e.preventDefault();
+  if (el.dataset.editDomains !== undefined) {
+    const a = S.apps.find((x) => x.id === el.dataset.editDomains);
+    if (!domainDrafts.has(a.id)) domainDrafts.set(a.id, editableDomains(a.domains));
+    openDomains = openDomains === a.id ? null : a.id;
+    return render();
+  }
+  if (el.dataset.cancelDomains !== undefined) { domainDrafts.delete(el.dataset.cancelDomains); openDomains = null; return render(); }
+  if (el.dataset.defaultDomains !== undefined) {
+    const a = S.apps.find((x) => x.id === el.dataset.defaultDomains);
+    const draft = editableDomains(a.defaultDomains);
+    domainDrafts.set(a.id, draft);
+    document.querySelector(`[data-domains="${CSS.escape(a.id)}"]`).value = draft;
+    return;
+  }
+  if (el.dataset.saveDomains !== undefined) {
+    const app = el.dataset.saveDomains, input = document.querySelector(`[data-domains="${CSS.escape(app)}"]`);
+    if (await api("set_domains", { app, domains: input.value.split(/[\s,;]+/).filter(Boolean) })) {
+      domainDrafts.delete(app); openDomains = null; render(); toast(t("saved"));
+    }
+    return;
+  }
   if (el.dataset.url) return api("open_url", { value: el.dataset.url });
   if (el.dataset.go) { location.hash = el.dataset.go; return; }
-  if (el.dataset.rule !== undefined) { openRule = openRule === el.dataset.rule ? null : el.dataset.rule; return render(); }
+  if (el.dataset.appSettings !== undefined) { openAppSettings = openAppSettings === el.dataset.appSettings ? null : el.dataset.appSettings; openDomains = null; return render(); }
   if (el.dataset.addcbtn !== undefined) {
     const app = el.dataset.addcbtn, inp = document.querySelector(`[data-addc="${CSS.escape(app)}"]`);
     if (!inp.value.trim()) return;
@@ -427,12 +533,32 @@ document.addEventListener("click", async (e) => {
   }
   if (el.id === "trustBtn") return api("trust_network", { value: document.getElementById("netName").value });
   const d = el.dataset;
-  if (d.op === "remove_rule" && openRule === d.app) openRule = null;
   await api(d.op, { app: d.app || "", value: d.value || "" });
+});
+
+document.addEventListener("input", (e) => {
+  if (e.target.dataset.domains !== undefined) domainDrafts.set(e.target.dataset.domains, e.target.value);
 });
 
 document.addEventListener("change", async (e) => {
   const el = e.target;
+  if (el.dataset.ruleSource !== undefined) {
+    const app = el.dataset.ruleSource;
+    const ok = el.value === "shared" ? await api("remove_rule", { app })
+      : await api("set_rule", { app, ips: [...S.allow.ips], countries: S.allow.countries.map((c) => c.code) });
+    if (!ok) await refresh(true);
+    return;
+  }
+  if (el.dataset.domainToggle !== undefined) {
+    const a = S.apps.find((x) => x.id === el.dataset.domainToggle);
+    if (el.checked && !(a.domains || []).length) {
+      el.checked = false; openDomains = a.id;
+      if (!domainDrafts.has(a.id)) domainDrafts.set(a.id, "");
+      render(); toast(t("domain_required")); return;
+    }
+    if (!await api("set_domain_checks", { app: a.id, enabled: el.checked })) await refresh(true);
+    return;
+  }
   if (el.id === "pauseSel" && el.value !== "") return api("pause", { minutes: +el.value });
   if (el.dataset.toggle) return api("toggle_app", { app: el.dataset.toggle });
   if (el.id === "autostart") return api("autostart", { value: el.checked ? "on" : "off" });
@@ -451,7 +577,7 @@ document.addEventListener("keydown", (e) => {
   if (btn) btn.click();
 });
 
-window.addEventListener("hashchange", () => { page = location.hash.slice(1); openRule = null; render(); });
+window.addEventListener("hashchange", () => { page = location.hash.slice(1); openAppSettings = null; openDomains = null; render(); });
 
 (async () => {
   await refresh(true);

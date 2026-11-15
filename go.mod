@@ -1,4 +1,4 @@
-module github.com/ef1m03/kordon
+module github.com/avazar/zaslon
 
 go 1.26.5
 

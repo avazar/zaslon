@@ -1,8 +1,8 @@
 package window
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,15 +11,16 @@ import (
 // Open shows the panel as an Edge "app" window: no tabs or address bar, its own
 // window in the taskbar. Edge ships with every Windows 10/11, so nothing extra
 // is needed. A separate profile folder keeps it away from the user's own Edge.
-func Open(url, _, _, _ string) error {
+func Open(ctx context.Context, focus <-chan struct{}, url, _, _, _ string, icon []byte) error {
 	edge := findEdge()
 	if edge == "" {
 		return errors.New("Microsoft Edge not found")
 	}
-	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "Kordon", "panel-profile")
-	cmd := exec.Command(edge, "--app="+url, fmt.Sprintf("--window-size=%d,%d", Width, Height),
-		"--user-data-dir="+profile, "--no-first-run", "--disable-features=Translate")
-	return cmd.Start()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return err
+	}
+	return openBrowserPanel(ctx, focus, edge, url, filepath.Join(base, "Zaslon", "panels"), icon, nil)
 }
 
 func findEdge() string {

@@ -1,4 +1,4 @@
-// Package config reads and writes Kordon's config.yaml.
+// Package config reads and writes Zaslon's config.yaml.
 //
 // The file is meant to be edited by hand, so it is always written back from a
 // commented template (see render.go) instead of a bare yaml.Marshal.
@@ -60,24 +60,24 @@ type Config struct {
 	Allow      Allow       `yaml:"allow"`
 	// AppRules gives an app its own allow-list instead of the shared one.
 	// The key is a preset id (cursor) or a custom app's name.
-	AppRules        map[string]Allow `yaml:"app_rules"`
-	TrustedNetworks []TrustedNetwork `yaml:"trusted_networks"`
+	AppRules            map[string]Allow    `yaml:"app_rules"`
+	DomainChecks        map[string][]string `yaml:"domain_checks"`
+	DomainChecksEnabled map[string]bool     `yaml:"domain_checks_enabled"`
+	TrustedNetworks     []TrustedNetwork    `yaml:"trusted_networks"`
 
-	FreezeOnNetworkChange bool     `yaml:"freeze_on_network_change"`
-	BlockWhenOffline      bool     `yaml:"block_when_offline"`
-	Grace                 Duration `yaml:"grace"`
-	CloseTimeout          Duration `yaml:"close_timeout"`
-	CheckInterval         Duration `yaml:"check_interval"`
+	CheckInterval Duration `yaml:"check_interval"`
 
-	IPServices    []string `yaml:"ip_services"`
-	MinAgree      int      `yaml:"min_agree"`
-	CheckIPv6     bool     `yaml:"check_ipv6"`
-	DNSCheck      string   `yaml:"dns_check"`
-	IPv6Services  []string `yaml:"ipv6_services"`
-	MenuBar       string   `yaml:"menubar"`
-	UpdateCheck   bool     `yaml:"update_check"`
-	Language      string   `yaml:"language"`
-	Notifications bool     `yaml:"notifications"`
+	IPServices            []string      `yaml:"ip_services"`
+	MinAgree              int           `yaml:"min_agree"`
+	CheckIPv6             bool          `yaml:"check_ipv6"`
+	IPUnavailableAction   FailureAction `yaml:"ip_unavailable_action"`
+	IPv6UnavailableAction FailureAction `yaml:"ipv6_unavailable_action"`
+	DNSCheck              string        `yaml:"dns_check"`
+	IPv6Services          []string      `yaml:"ipv6_services"`
+	MenuBar               string        `yaml:"menubar"`
+	UpdateCheck           bool          `yaml:"update_check"`
+	Language              string        `yaml:"language"`
+	Notifications         bool          `yaml:"notifications"`
 }
 
 var DefaultIPServices = []string{
@@ -96,19 +96,19 @@ var DefaultIPv6Services = []string{
 
 func Default() *Config {
 	return &Config{
-		Apps:                  []string{"claude"},
-		FreezeOnNetworkChange: true,
-		BlockWhenOffline:      true,
-		Grace:                 Duration(20 * time.Second),
-		CloseTimeout:          Duration(5 * time.Second),
+		DomainChecks:          defaultDomainLists(),
+		DomainChecksEnabled:   map[string]bool{},
+		Apps:                  []string{},
 		CheckInterval:         Duration(5 * time.Second),
 		IPServices:            append([]string(nil), DefaultIPServices...),
 		MinAgree:              2,
 		CheckIPv6:             true,
+		IPUnavailableAction:   SuspendOnFailure,
+		IPv6UnavailableAction: SuspendOnFailure,
 		DNSCheck:              "warn",
 		IPv6Services:          append([]string(nil), DefaultIPv6Services...),
 		MenuBar:               "ip",
-		UpdateCheck:           true,
+		UpdateCheck:           false,
 		Language:              "auto",
 		Notifications:         true,
 	}
@@ -117,8 +117,30 @@ func Default() *Config {
 // Parse reads YAML on top of the defaults, so a missing key keeps its default.
 func Parse(data []byte) (*Config, error) {
 	c := Default()
+	// Decode maps without merging defaults, so legacy entries can be migrated
+	// without mistaking prefilled domains for previously enabled checks.
+	c.DomainChecks, c.DomainChecksEnabled = nil, nil
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, err
+	}
+	var fields map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	if node, present := fields["domain_checks_enabled"]; present {
+		if node.Kind != yaml.MappingNode {
+			return nil, errors.New("domain_checks_enabled: expected an app-to-boolean mapping")
+		}
+	} else {
+		// Legacy files enabled checks by a nonempty list. Preserve that behavior
+		// once, then always write an explicit enabled map on the next save.
+		c.DomainChecksEnabled = map[string]bool{}
+		for id, endpoints := range c.DomainChecks {
+			c.DomainChecksEnabled[id] = len(endpoints) > 0
+			if len(endpoints) == 0 {
+				c.DomainChecks[id] = DefaultDomains(strings.ToLower(strings.TrimSpace(id)))
+			}
+		}
 	}
 	if err := c.normalize(); err != nil {
 		return nil, err
@@ -127,6 +149,9 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) normalize() error {
+	if err := c.normalizePolicies(); err != nil {
+		return err
+	}
 	for i, cc := range c.Allow.Countries {
 		cc = strings.ToUpper(strings.TrimSpace(cc))
 		if len(cc) != 2 {
@@ -146,9 +171,6 @@ func (c *Config) normalize() error {
 		if strings.TrimSpace(a.Name) == "" || len(a.Match) == 0 {
 			return errors.New("custom_apps: у каждого приложения нужны name и match")
 		}
-	}
-	if c.Grace < 0 || c.CloseTimeout < 0 {
-		return errors.New("grace и close_timeout не могут быть отрицательными")
 	}
 	if c.CheckInterval.D() < 3*time.Second {
 		c.CheckInterval = Duration(3 * time.Second)
@@ -180,6 +202,9 @@ func (c *Config) normalize() error {
 		rules[strings.ToLower(strings.TrimSpace(k))] = a
 	}
 	c.AppRules = rules
+	if err := c.normalizeDomains(); err != nil {
+		return err
+	}
 	switch c.MenuBar {
 	case "ip", "country", "icon":
 	default:
@@ -220,6 +245,14 @@ func (c *Config) Clone() *Config {
 	n.IPv6Services = append([]string(nil), c.IPv6Services...)
 	n.TrustedNetworks = append([]TrustedNetwork(nil), c.TrustedNetworks...)
 	n.AppRules = make(map[string]Allow, len(c.AppRules))
+	n.DomainChecks = make(map[string][]string, len(c.DomainChecks))
+	n.DomainChecksEnabled = make(map[string]bool, len(c.DomainChecksEnabled))
+	for k, enabled := range c.DomainChecksEnabled {
+		n.DomainChecksEnabled[k] = enabled
+	}
+	for k, endpoints := range c.DomainChecks {
+		n.DomainChecks[k] = append([]string(nil), endpoints...)
+	}
 	for k, a := range c.AppRules {
 		n.AppRules[k] = Allow{IPs: append([]string(nil), a.IPs...), Countries: append([]string(nil), a.Countries...)}
 	}

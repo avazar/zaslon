@@ -23,6 +23,10 @@ func (c *osController) List() ([]Proc, error) {
 			continue
 		}
 		dir := "/proc/" + e.Name()
+		// Capture birth before attributes. If the PID is recycled during these
+		// reads, a later operation rejects the replacement instead of binding
+		// an old executable name to the replacement's new birth identity.
+		born, _ := processIdentity(pid)
 		path, _ := os.Readlink(dir + "/exe")
 		path = strings.TrimSuffix(path, " (deleted)")
 		name := filepath.Base(path)
@@ -30,7 +34,7 @@ func (c *osController) List() ([]Proc, error) {
 			comm, _ := os.ReadFile(dir + "/comm")
 			name = strings.TrimSpace(string(comm))
 		}
-		p := Proc{PID: pid, PPID: parentPID(dir), Name: name, Path: path}
+		p := Proc{PID: pid, Created: born, PPID: parentPID(dir), Name: name, Path: path}
 		if isInterpreter(name) {
 			raw, _ := os.ReadFile(dir + "/cmdline")
 			p.Args = strings.TrimSpace(strings.ReplaceAll(string(raw), "\x00", " "))
@@ -38,6 +42,27 @@ func (c *osController) List() ([]Proc, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+func processIdentity(pid int) (string, error) {
+	identity, _, err := processState(pid)
+	return identity, err
+}
+
+func processState(pid int) (string, bool, error) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return "", false, err
+	}
+	f := strings.Fields(string(b)[strings.LastIndexByte(string(b), ')')+1:])
+	if len(f) < 20 {
+		return "", false, os.ErrInvalid
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(string(boot)) + ":" + f[19], f[0] == "T" || f[0] == "t", nil
 }
 
 // parentPID reads the 4th field of /proc/<pid>/stat; the 2nd (comm) may contain spaces and ")".

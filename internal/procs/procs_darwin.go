@@ -3,7 +3,9 @@ package procs
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -49,7 +51,7 @@ func (c *osController) List() ([]Proc, error) {
 		if ce.path == "" {
 			name = unix.ByteSliceToString(kp.Proc.P_comm[:])
 		}
-		p := Proc{PID: pid, PPID: int(kp.Eproc.Ppid), Name: name, Path: ce.path}
+		p := Proc{PID: pid, Created: strconv.FormatInt(start, 10), PPID: int(kp.Eproc.Ppid), Name: name, Path: ce.path}
 		if isInterpreter(name) {
 			p.Args = ce.args
 		}
@@ -61,6 +63,22 @@ func (c *osController) List() ([]Proc, error) {
 		}
 	}
 	return out, nil
+}
+
+func processIdentity(pid int) (string, error) {
+	identity, _, err := processState(pid)
+	return identity, err
+}
+
+func processState(pid int) (string, bool, error) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return "", false, err
+	}
+	if kp == nil || kp.Proc.P_pid != int32(pid) || kp.Proc.P_starttime.Sec == 0 {
+		return "", false, os.ErrNotExist
+	}
+	return strconv.FormatInt(kp.Proc.P_starttime.Sec*1_000_000+int64(kp.Proc.P_starttime.Usec), 10), kp.Proc.P_stat == 4, nil // SSTOP in sys/proc.h
 }
 
 // procArgs reads kern.procargs2: argc (int32), exec path, NUL padding, argv..., env...

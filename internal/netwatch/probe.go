@@ -68,16 +68,23 @@ type IPResult struct {
 // Confirmed reports whether at least need services agree and none disagrees.
 func (r IPResult) Confirmed(need int) bool { return r.Votes >= need && len(r.Others) == 0 }
 
-// PublicIP asks all services at once and returns as soon as need of them agree.
-// v6 selects IPv6; with no IPv6 connectivity it returns ErrOffline quickly.
-func PublicIP(ctx context.Context, services []string, timeout time.Duration, v6 bool, need int) (IPResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+// PublicIP asks all services concurrently and collects responses until every
+// request finishes or the shared timeout expires. A quorum never ends collection
+// early: a slower service may report a different route. Unresponsive services do
+// not vote; callers decide whether the collected votes are sufficient.
+func PublicIP(ctx context.Context, services []string, timeout time.Duration, v6 bool) (IPResult, error) {
+	return publicIP(ctx, services, timeout, v6, SystemProxy())
+}
+
+// publicIP allows local-server tests to avoid the machine's proxy settings.
+func publicIP(parent context.Context, services []string, timeout time.Duration, v6 bool, proxy *url.URL) (IPResult, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	network := "tcp4"
 	if v6 {
 		network = "tcp6"
 	}
-	c := client(SystemProxy(), timeout, network)
+	c := client(proxy, timeout, network)
 	answers := make(chan string, len(services))
 	var wg sync.WaitGroup
 	for _, s := range services {
@@ -97,9 +104,11 @@ func PublicIP(ctx context.Context, services []string, timeout time.Duration, v6 
 	votes := map[string]int{}
 	for ip := range answers {
 		votes[ip]++
-		if votes[ip] >= need {
-			break
-		}
+	}
+	// A cancelled/superseded check cannot publish its partial successes. The
+	// collection's own timeout may still yield enough completed responses.
+	if err := parent.Err(); err != nil {
+		return IPResult{}, err
 	}
 	return tally(votes)
 }

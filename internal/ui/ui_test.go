@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ef1m03/kordon/internal/config"
-	"github.com/ef1m03/kordon/internal/guard"
+	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/guard"
 )
 
 func TestMessagesComplete(t *testing.T) {
@@ -57,8 +57,8 @@ func TestCountry(t *testing.T) {
 
 func TestStatusLine(t *testing.T) {
 	Lang = "ru"
-	s := guard.Snapshot{Status: guard.Suspect, Reason: guard.IPNotAllowed, GraceLeft: 17 * time.Second, Config: config.Default()}
-	if got := StatusLine(s); got != "IP не разрешён: заморожено, закрою через 17 с" {
+	s := guard.Snapshot{Status: guard.Suspect, Reason: guard.IPNotAllowed, Config: config.Default()}
+	if got := StatusLine(s); got != "IP не разрешён: приложения приостановлены" {
 		t.Errorf("%q", got)
 	}
 }

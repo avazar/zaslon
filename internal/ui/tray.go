@@ -13,11 +13,11 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/ef1m03/kordon/internal/app"
-	"github.com/ef1m03/kordon/internal/config"
-	"github.com/ef1m03/kordon/internal/guard"
-	"github.com/ef1m03/kordon/internal/procs"
-	"github.com/ef1m03/kordon/internal/update"
+	"github.com/avazar/zaslon/internal/app"
+	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/guard"
+	"github.com/avazar/zaslon/internal/procs"
+	"github.com/avazar/zaslon/internal/update"
 )
 
 const (
@@ -49,7 +49,7 @@ type Tray struct {
 	hist                                    []*systray.MenuItem
 	mSettings, mLog, mAutostart             *systray.MenuItem
 	mBar, mBarIP, mBarCountry, mBarIcon     *systray.MenuItem
-	mAbout, mStudio, mQuit                  *systray.MenuItem
+	mAbout, mQuit                           *systray.MenuItem
 	mUpdate, mPanel, mTrust, mDNS, mReport  *systray.MenuItem
 	latest                                  update.Release
 	quitNow                                 chan struct{}
@@ -62,7 +62,7 @@ func (t *Tray) Run() {
 }
 
 func (t *Tray) onReady() {
-	systray.SetTooltip("Kordon")
+	systray.SetTooltip("Zaslon")
 	t.setIcon(guard.Snapshot{Config: config.Default()})
 
 	t.mUpdate = systray.AddMenuItem("", "")
@@ -137,7 +137,6 @@ func (t *Tray) onReady() {
 	t.mBarIcon = t.mBar.AddSubMenuItemCheckbox(T("menubar.icon"), "", false)
 	systray.AddSeparator()
 	t.mAbout = systray.AddMenuItem(T("about", t.Version), "")
-	t.mStudio = systray.AddMenuItem(T("studio"), "")
 	systray.AddSeparator()
 	t.mQuit = systray.AddMenuItem(T("quit"), "")
 
@@ -211,8 +210,6 @@ func (t *Tray) loop() {
 			return
 		case <-t.mAbout.ClickedCh:
 			_ = app.OpenURL(app.RepoURL)
-		case <-t.mStudio.ClickedCh:
-			_ = app.OpenURL(app.StudioURL)
 		case <-t.mQuit.ClickedCh:
 			if t.OnQuit != nil {
 				t.OnQuit()
@@ -265,7 +262,7 @@ func (t *Tray) InstallUpdate() {
 	}
 }
 
-// installUpdate replaces Kordon with the new version and restarts it; true means we're exiting.
+// installUpdate replaces Zaslon with the new version and restarts it; true means we're exiting.
 func (t *Tray) installUpdate() bool {
 	t.mu.Lock()
 	rel := t.latest
@@ -396,13 +393,19 @@ func (t *Tray) render(s guard.Snapshot, evs []guard.Event) {
 	setChecked(t.mBarIcon, cfg.MenuBar == "icon")
 
 	app.WriteState(app.State{
-		Status: statusName(s.Status), Line: StatusLine(s), IP: s.IP, Country: s.Country,
+		Status: statusName(s), Line: StatusLine(s), IP: s.IP, Country: s.Country,
 		Allowed: allowed, Apps: running, Frozen: s.Frozen, Paused: s.Paused(),
 	})
 }
 
-func statusName(st guard.Status) string {
-	return [...]string{"starting", "ok", "frozen", "blocked"}[st]
+func statusName(s guard.Snapshot) string {
+	if len(s.Errors) != 0 {
+		return "error"
+	}
+	if s.Status == guard.OK && len(s.Warnings) > 0 {
+		return "warning"
+	}
+	return [...]string{"starting", "ok", "frozen", "blocked"}[s.Status]
 }
 
 func dotFor(t Tone) string {
@@ -444,9 +447,6 @@ func barText(s guard.Snapshot) string {
 	} else {
 		b.WriteString(s.IP)
 	}
-	if s.Status == guard.Suspect && s.Reason != guard.NetChanged && !s.Paused() {
-		b.WriteString(" · " + Dur(s.GraceLeft))
-	}
 	return b.String()
 }
 
@@ -472,8 +472,11 @@ func (t *Tray) setIcon(s guard.Snapshot) {
 	t.lastIcon = key
 
 	tip := map[Tone]string{Gray: T("tip.paused"), Green: T("tip.ok"), Amber: T("tip.frozen"), Red: T("tip.blocked")}[tone]
+	if s.Status == guard.OK && len(s.Warnings) > 0 && !s.Paused() {
+		tip = "Zaslon: " + StatusLine(s)
+	}
 	if s.Status == guard.Starting && !s.Paused() {
-		tip = "Kordon: " + T("starting")
+		tip = "Zaslon: " + T("starting")
 	}
 	if s.IP != "" && s.Config.MenuBar != "icon" {
 		if s.Config.MenuBar == "country" {
@@ -485,7 +488,7 @@ func (t *Tray) setIcon(s guard.Snapshot) {
 	systray.SetTooltip(tip)
 }
 
-// HeadlessRender logs and notifies without a tray icon (kordon headless).
+// HeadlessRender logs and notifies without a tray icon (zaslon headless).
 func HeadlessRender(s guard.Snapshot, evs []guard.Event) {
 	for _, e := range evs {
 		line := EventLine(e)
@@ -496,18 +499,20 @@ func HeadlessRender(s guard.Snapshot, evs []guard.Event) {
 		}
 	}
 	app.WriteState(app.State{
-		Status: statusName(s.Status), Line: StatusLine(s), IP: s.IP, Country: s.Country,
+		Status: statusName(s), Line: StatusLine(s), IP: s.IP, Country: s.Country,
 		Allowed: s.Allowed(), Apps: procs.AppNames(s.Running), Frozen: s.Frozen, Paused: s.Paused(),
 	})
 }
 
-// OpenPanel starts `kordon panel`, which shows the panel window.
+// OpenPanel starts `zaslon panel`, which shows the panel window.
 func OpenPanel() {
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
 	cmd := exec.Command(exe, "panel")
-	cmd.Env = append(os.Environ(), "KORDON_CHILD=1") // the panel needs no supervisor
-	_ = cmd.Start()
+	cmd.Env = append(os.Environ(), "ZASLON_CHILD=1") // the panel needs no supervisor
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }()
+	}
 }

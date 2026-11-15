@@ -1,4 +1,21 @@
+# Generated binaries, reports, profiles and local backups.
 dist/
 build/
 *.syso
 .DS_Store
+
+# Private development notes, design archive and machine-specific VM tooling.
+/docs/DEVELOPMENT.md
+/docs/WORK-PLAN.txt
+/docs/WINDOWS-LAB.md
+/docs/branding/
+/docs/img/
+/scripts/lab/
+/tools/vm-fixture/
+
+# Local credentials and diagnostic logs.
+.env
+.env.*
+!.env.example
+*.log
+*.log.*

@@ -7,7 +7,7 @@ package window
 
 // A regular app while the panel is open: Dock icon, ⌘Tab, and an Edit menu,
 // without which ⌘C / ⌘V / ⌘A don't work in the page's text fields.
-static void kordon_setup_app(const char *closeTitle, const char *quitTitle) {
+static void zaslon_setup_app(const char *closeTitle, const char *quitTitle) {
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 	NSMenu *bar = [NSMenu new];
 
@@ -33,17 +33,26 @@ static void kordon_setup_app(const char *closeTitle, const char *quitTitle) {
 	[NSApp setMainMenu:bar];
 	[NSApp activateIgnoringOtherApps:YES];
 }
+
+static void zaslon_activate_panel(void) {
+    for (NSWindow *window in [NSApp windows]) {
+        if ([window isMiniaturized]) [window deminiaturize:nil];
+        [window makeKeyAndOrderFront:nil];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+}
 */
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	webview "github.com/webview/webview_go"
 )
 
 // Open shows the panel and blocks until the window is closed.
-func Open(url, title, closeTitle, quitTitle string) error {
+func Open(ctx context.Context, focus <-chan struct{}, url, title, closeTitle, quitTitle string, _ []byte) error {
 	w := webview.New(false)
 	defer w.Destroy()
 	w.SetTitle(title)
@@ -51,8 +60,25 @@ func Open(url, title, closeTitle, quitTitle string) error {
 	ct, qt := C.CString(closeTitle), C.CString(quitTitle)
 	defer C.free(unsafe.Pointer(ct))
 	defer C.free(unsafe.Pointer(qt))
-	w.Dispatch(func() { C.kordon_setup_app(ct, qt) })
+	w.Dispatch(func() { C.zaslon_setup_app(ct, qt) })
 	w.Navigate(url)
+	closed := make(chan struct{})
+	workerDone := make(chan struct{})
+	defer func() { close(closed); <-workerDone }()
+	go func() {
+		defer close(workerDone)
+		for {
+			select {
+			case <-closed:
+				return
+			case <-ctx.Done():
+				w.Dispatch(func() { w.Terminate() })
+				return
+			case <-focus:
+				w.Dispatch(func() { C.zaslon_activate_panel() })
+			}
+		}
+	}()
 	w.Run()
 	return nil
 }

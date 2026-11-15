@@ -1,8 +1,7 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 # Actions are pinned to commit hashes: a moved tag can't change what runs here.
 permissions:
@@ -20,16 +19,22 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: VERSION=${GITHUB_REF_NAME} ./scripts/build-mac.sh
+      - run: ./scripts/build-mac.sh
+      - name: Verify complete macOS package
+        run: go run ./tools/package -verify "dist/zaslon-$(cat VERSION)-macos-universal.zip" -smoke
       # Signed build provenance: anyone can check a file was built here, from this commit:
-      #   gh attestation verify <file> --repo ef1m03/kordon
+      #   gh attestation verify <file> --repo avazar/zaslon
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/Kordon-macos.zip
+          subject-path: dist/zaslon-*.zip
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos
-          path: dist/Kordon-macos.zip
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/zaslon-*.zip
+            dist/zaslon-*.sha256
 
   windows-linux:
     runs-on: ubuntu-latest
@@ -42,29 +47,33 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: VERSION=${GITHUB_REF_NAME} ./scripts/build-windows.sh
-      - name: Linux
+      - run: ./scripts/build-windows.sh
+      - run: bash ./scripts/build-linux.sh
+      - name: Verify complete archives and native version commands
         run: |
-          for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o kordon ./cmd/kordon
-            tar -czf dist/kordon-linux-$arch.tar.gz kordon
+          for archive in dist/zaslon-*.zip dist/zaslon-*.tar.gz; do
+            go run ./tools/package -verify "$archive" -smoke
           done
       # Signed build provenance: anyone can check a file was built here, from this commit:
-      #   gh attestation verify <file> --repo ef1m03/kordon
+      #   gh attestation verify <file> --repo avazar/zaslon
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/*.exe
-            dist/*.tar.gz
+            dist/zaslon-*.zip
+            dist/zaslon-*.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-linux
+          retention-days: 7
           path: |
-            dist/*.exe
-            dist/*.tar.gz
+            dist/zaslon-*.zip
+            dist/zaslon-*.tar.gz
+            dist/zaslon-*.sha256
+          if-no-files-found: error
 
   release:
+    # Re-enable only after recovery packaging and isolated platform testing.
+    if: ${{ false }}
     needs: [macos, windows-linux]
     runs-on: ubuntu-latest
     permissions:
@@ -79,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp scripts/install.sh scripts/install.ps1 dist/
-          (cd dist && sha256sum * > SHA256SUMS.txt)
+          test "$GITHUB_REF_NAME" = "v$(tr -d '\r\n' < VERSION)"
+          (cd dist && sha256sum zaslon-*.zip zaslon-*.tar.gz > SHA256SUMS.txt)
           ./scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --title "Kordon ${GITHUB_REF_NAME}" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --prerelease --title "Zaslon ${GITHUB_REF_NAME}" --notes-file notes.md

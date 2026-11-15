@@ -9,12 +9,13 @@ import (
 	"math"
 	"sync"
 
+	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/ef1m03/kordon/internal/guard"
+	"github.com/avazar/zaslon/internal/guard"
 )
 
 // Tone is the colour of the icon.
@@ -35,11 +36,17 @@ var tones = map[Tone]color.NRGBA{
 }
 
 func ToneOf(s guard.Snapshot) Tone {
+	if len(s.Errors) != 0 {
+		return Red
+	}
 	if s.Paused() {
 		return Gray
 	}
 	switch s.Status {
 	case guard.OK:
+		if len(s.Warnings) > 0 {
+			return Amber
+		}
 		return Green
 	case guard.Suspect:
 		return Amber
@@ -153,44 +160,53 @@ func ICO(imgs ...*image.NRGBA) []byte {
 	return append(hdr.Bytes(), body.Bytes()...)
 }
 
-// AppIcon is the big icon for the .app bundle, the .exe and the README.
+var (
+	appIconOnce   sync.Once
+	appIcon       image.Image
+	smallAppIcons map[int]image.Image
+)
+
+// AppIcon chooses the simplified dot for small sizes and the snowflake for large ones.
 func AppIcon(n int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, n, n))
-	fn := float64(n)
-	bg := color.NRGBA{0x11, 0x18, 0x27, 0xff}
-	m := fn * 0.09 // macOS icon grid margin
-	fill(img, bg, func(x, y float64) float64 { return roundRectAlpha(x-m, y-m, fn-2*m, fn-2*m, (fn-2*m)*0.225) })
-	// Shield outline with a green dot: "a guarded border". Drawn with 4x4
-	// supersampling; the inner shield is the outer one inset by the stroke width.
-	inShield := func(x, y, cx, top, w, h float64) bool {
-		if y < top || y > top+h {
-			return false
-		}
-		t := (y - top) / h
-		half := w / 2
-		if t > 0.5 {
-			half *= math.Sqrt(math.Max(0, 1-math.Pow((t-0.5)/0.5, 2)))
-		}
-		return math.Abs(x-cx) <= half
-	}
-	sw := fn * 0.05
-	cx, top, w, h := fn/2, fn*0.23, fn*0.46, fn*0.56
-	shield := func(x, y float64) float64 {
-		hit := 0
-		for i := 0; i < 4; i++ {
-			for j := 0; j < 4; j++ {
-				px, py := x-0.5+(float64(i)+0.5)/4, y-0.5+(float64(j)+0.5)/4
-				if inShield(px, py, cx, top, w, h) && !inShield(px, py, cx, top+sw, w-2*sw, h-2.2*sw) {
-					hit++
-				}
+	return AppIconForSize(n, n)
+}
+
+// AppIconForSize distinguishes display size from pixel density: a 32px Retina
+// icon rendered at 64px must keep the dot. Small masters have optical weights
+// tuned for their logical size and enough resolution for high-DPI screens.
+func AppIconForSize(pixels, logicalSize int) *image.NRGBA {
+	appIconOnce.Do(func() {
+		decode := func(path string) image.Image {
+			data, err := panelFiles.ReadFile(path)
+			if err != nil {
+				panic(err)
 			}
+			img, err := png.Decode(bytes.NewReader(data))
+			if err != nil {
+				panic(err)
+			}
+			return img
 		}
-		return float64(hit) / 16
-	}
-	fill(img, color.NRGBA{0xe5, 0xe7, 0xeb, 0xff}, shield)
-	fill(img, tones[Green], func(x, y float64) float64 {
-		d := math.Hypot(x-fn/2, y-fn*0.47) - fn*0.085
-		return math.Min(math.Max(0.5-d, 0), 1)
+		appIcon = decode("panel/icon.png")
+		smallAppIcons = map[int]image.Image{
+			16: decode("panel/icons/small-16.png"), 20: decode("panel/icons/small-20.png"),
+			24: decode("panel/icons/small-24.png"), 32: decode("panel/icons/small-32.png"),
+		}
 	})
+	source := appIcon
+	if logicalSize <= 32 {
+		size := 32
+		switch {
+		case logicalSize <= 16:
+			size = 16
+		case logicalSize <= 20:
+			size = 20
+		case logicalSize <= 24:
+			size = 24
+		}
+		source = smallAppIcons[size]
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, pixels, pixels))
+	draw.CatmullRom.Scale(img, img.Bounds(), source, source.Bounds(), draw.Src, nil)
 	return img
 }
