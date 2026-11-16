@@ -69,8 +69,7 @@ try {
         }
         & $workflowLinter -no-color -shellcheck= -pyflakes= .github/workflows/ci.yml
         if ($LASTEXITCODE -ne 0) { throw 'GitHub Actions workflow validation failed.' }
-        # Release publishing stays deliberately disabled with a constant false gate.
-        & $workflowLinter -no-color -shellcheck= -pyflakes= -ignore 'constant expression .false. in condition' .github/workflows/release.yml
+        & $workflowLinter -no-color -shellcheck= -pyflakes= .github/workflows/release.yml
         if ($LASTEXITCODE -ne 0) { throw 'Release workflow validation failed.' }
         Invoke-Go vet ./...
         Invoke-Go test -count=1 -timeout=120s ./...

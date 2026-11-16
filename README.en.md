@@ -31,7 +31,8 @@ traffic restrictions at the network layer requires a separate, tested filter.
 ## Project status
 
 Development takes place on `dev`. There are no validated Zaslon releases for daily
-use yet. Installers, release publishing, and self-update are disabled.
+use yet. A PowerShell installer is prepared for Windows; self-update remains
+disabled. Releases are built manually and default to drafts.
 
 | Platform | Validated stages |
 |---|---|
@@ -217,6 +218,44 @@ base URL, or additional domains may use a different route. This is not tied to
 the app's session and cannot prove the route of every request. Endpoint availability
 may change, resulting in an uncertain check.
 [Details, limitations, and the end-to-end test (Russian)](docs/NETWORK-CHECKS.md).
+
+## Windows installation
+
+The first release has not been published yet. Once the `v0.3.0` prerelease is
+published, run this in a regular PowerShell window:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v0.3.0/install.ps1')))
+```
+
+The URL will fail until the asset is published. Each release installer is pinned
+to its version. PowerShell 5.1+ and Windows AMD64/ARM64 are required; administrator
+rights are unnecessary.
+
+The installer verifies archive and file SHA-256 checksums, installs both programs
+in `%LOCALAPPDATA%\Programs\Zaslon`, and creates a Start menu shortcut.
+Settings stay in `%APPDATA%\Zaslon`. The first launch of a new profile enables
+autostart, which can be disabled in the menu. No apps are initially selected.
+Manual ZIP extraction remains available.
+
+Run a newer release's installer to update. Settings and recovery records are
+preserved; previous files and a settings copy remain in an adjacent
+`Zaslon.backup-*` directory. Normal quit/resume is avoided: the new process adopts
+the journal and awaits fresh checks under the existing rules. If startup cannot
+be confirmed, the installer attempts to restore the old files and restart the old
+instance. After interruption, rerunning it first handles the pending transaction.
+
+To uninstall, quit Zaslon through its menu, then append `-Uninstall` to the command.
+Uninstall refuses unresolved suspensions; emergency resumption remains separate.
+Settings, backups, and unrelated files are retained. An unmanaged manual ZIP
+installation is not overwritten.
+
+Network monitoring briefly stops while files are replaced. Existing suspensions
+are not deliberately released, but continuous protection of running apps during
+the update is not guaranteed. Close protected apps first when updating them
+under this requirement.
+
+[Release build instructions (Russian)](docs/RELEASING.md).
 
 ## Build from source
 

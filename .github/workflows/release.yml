@@ -2,93 +2,128 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the prerelease immediately (otherwise create a draft)
+        required: true
+        default: false
+        type: boolean
 
-# Actions are pinned to commit hashes: a moved tag can't change what runs here.
 permissions:
   contents: read
 
-jobs:
-  macos:
-    runs-on: macos-latest
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: ./scripts/build-mac.sh
-      - name: Verify complete macOS package
-        run: go run ./tools/package -verify "dist/zaslon-$(cat VERSION)-macos-universal.zip" -smoke
-      # Signed build provenance: anyone can check a file was built here, from this commit:
-      #   gh attestation verify <file> --repo avazar/zaslon
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/zaslon-*.zip
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos
-          retention-days: 7
-          if-no-files-found: error
-          path: |
-            dist/zaslon-*.zip
-            dist/zaslon-*.sha256
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
-  windows-linux:
+jobs:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - name: Validate tag syntax
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify release source
+        id: source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          test "$RELEASE_TAG" = "v$version"
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor c4aa1470f10c60b5cef9db5c45959b8c1a9a4b46 HEAD
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.validate.outputs.commit }}
+
+  prepare:
+    needs: [validate, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: ./scripts/build-windows.sh
-      - run: bash ./scripts/build-linux.sh
-      - name: Verify complete archives and native version commands
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+      - name: Verify packages and pin installer version
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           for archive in dist/zaslon-*.zip dist/zaslon-*.tar.gz; do
-            go run ./tools/package -verify "$archive" -smoke
+            go run ./tools/package -verify "$archive"
           done
-      # Signed build provenance: anyone can check a file was built here, from this commit:
-      #   gh attestation verify <file> --repo avazar/zaslon
+          go run ./tools/release -version "$RELEASE_VERSION"
+          (cd dist && sha256sum --check SHA256SUMS.txt)
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/zaslon-*.zip
             dist/zaslon-*.tar.gz
+            dist/install.ps1
+            dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-linux
+          name: release-assets
           retention-days: 7
-          path: |
-            dist/zaslon-*.zip
-            dist/zaslon-*.tar.gz
-            dist/zaslon-*.sha256
           if-no-files-found: error
+          path: dist/*
 
   release:
-    # Re-enable only after recovery packaging and isolated platform testing.
-    if: ${{ false }}
-    needs: [macos, windows-linux]
+    needs: [validate, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+      - name: Refuse moved tags
+        env:
+          EXPECTED_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: release-assets
           path: dist
-          merge-multiple: true
-      - name: Publish
+      - name: Create draft or publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
-          test "$GITHUB_REF_NAME" = "v$(tr -d '\r\n' < VERSION)"
-          (cd dist && sha256sum zaslon-*.zip zaslon-*.tar.gz > SHA256SUMS.txt)
-          ./scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --prerelease --title "Zaslon ${GITHUB_REF_NAME}" --notes-file notes.md
+          (cd dist && sha256sum --check SHA256SUMS.txt)
+          ./scripts/release-notes.sh "$RELEASE_TAG" > notes.md
+          args=(--verify-tag --prerelease --latest=false --title "Zaslon $RELEASE_TAG" --notes-file notes.md)
+          if [ "$PUBLISH" != true ]; then args+=(--draft); fi
+          gh release create "$RELEASE_TAG" dist/* "${args[@]}"

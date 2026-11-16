@@ -33,6 +33,7 @@ import (
 
 var root = flag.String("root", "", "new artifact directory inside build/")
 var role = flag.String("role", "outer", "outer/run/parent/child/control")
+var installerPackage = flag.String("installer-package", "", "optional complete Windows ZIP for live installer handoff")
 
 type report struct {
 	Passed          bool                  `json:"passed"`
@@ -117,6 +118,13 @@ func outer() error {
 		return err
 	}
 	cmd := hidden(exec.Command(exe, "-role", "run", "-root", *root))
+	if *installerPackage != "" {
+		archive, e := filepath.Abs(*installerPackage)
+		if e != nil {
+			return e
+		}
+		cmd.Args = append(cmd.Args, "-installer-package", archive)
+	}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err = cmd.Start(); err != nil {
 		return err
@@ -138,13 +146,17 @@ func outer() error {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	deadline := 90 * time.Second
+	if *installerPackage != "" {
+		deadline = 150 * time.Second
+	}
 	select {
 	case err = <-done:
 		return err
-	case <-time.After(90 * time.Second):
+	case <-time.After(deadline):
 		windows.TerminateJobObject(job, 1)
 		<-done
-		return errors.New("90-second fixture deadline; only this test job was terminated")
+		return fmt.Errorf("%s fixture deadline; only this test job was terminated", deadline)
 	}
 }
 
@@ -307,6 +319,35 @@ func scenario(repo string, result *report) (err error) {
 		}
 	}()
 	paths := map[string]string{}
+	installDir := filepath.Join(bin, "installed")
+	install := func(noStart bool) error {
+		version, e := os.ReadFile(filepath.Join(repo, "VERSION"))
+		if e != nil {
+			return e
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		args := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(repo, "scripts", "install.ps1"),
+			"-Version", strings.TrimSpace(string(version)), "-PackagePath", *installerPackage, "-ChecksumPath", *installerPackage + ".sha256",
+			"-InstallDirectory", installDir, "-ProfileDirectory", profile, "-NoShortcut", "-Headless"}
+		if noStart {
+			args = append(args, "-NoStart")
+		}
+		cmd := hidden(exec.CommandContext(ctx, "powershell.exe", args...))
+		out, e := cmd.CombinedOutput()
+		if writeErr := os.WriteFile(filepath.Join(*root, fmt.Sprintf("installer-%t.log", noStart)), out, 0600); writeErr != nil {
+			return writeErr
+		}
+		if e != nil {
+			return fmt.Errorf("installer: %w: %s", e, out)
+		}
+		return nil
+	}
+	if *installerPackage != "" {
+		if err = install(true); err != nil {
+			return err
+		}
+	}
 	self, e := os.Executable()
 	if e != nil {
 		return e
@@ -319,8 +360,12 @@ func scenario(repo string, result *report) (err error) {
 	}
 	for _, name := range []string{"zaslon", "zaslon-recover"} {
 		paths[name] = filepath.Join(bin, name+".exe")
-		if err = copyFile(filepath.Join(repo, "build", "dev", name+".exe"), paths[name]); err != nil {
-			return err
+		if *installerPackage != "" {
+			paths[name] = filepath.Join(installDir, name+".exe")
+		} else {
+			if err = copyFile(filepath.Join(repo, "build", "dev", name+".exe"), paths[name]); err != nil {
+				return err
+			}
 		}
 		data, _ := os.ReadFile(paths[name])
 		sum := sha256.Sum256(data)
@@ -818,6 +863,99 @@ func scenario(repo string, result *report) (err error) {
 		}
 	}
 	result.Checks = append(result.Checks, "the supervisor's automatic worker restart preserves every existing suspension without a preliminary resume")
+	activeSupervisor := guard.Process.Pid
+	if *installerPackage != "" {
+		beforeConfig, e := os.ReadFile(filepath.Join(profile, "config.yaml"))
+		if e != nil {
+			return e
+		}
+		receiptBefore, e := os.ReadFile(filepath.Join(installDir, "install-receipt.json"))
+		if e != nil {
+			return e
+		}
+		// Inject a startup failure in an imported copy of the installer functions.
+		// There is no failure switch in the shipping installer's interface.
+		rollbackScript := filepath.Join(*root, "test-installer-rollback.ps1")
+		body := "param($InstallerSource,$ZipFile,$InstallTarget,$TestProfile,$TestVersion)\n" +
+			"$ErrorActionPreference='Stop'\n. $InstallerSource\n" +
+			"$script:originalStart=(Get-Item Function:Start-InstallRuntime).ScriptBlock\n$script:originalRead=(Get-Item Function:Read-SharedJSON).ScriptBlock\n$script:startAttempts=0\n$script:failState=$false\n" +
+			"function Read-SharedJSON([string]$Path) { if($script:failState -and (Split-Path $Path -Leaf) -eq 'state.json'){throw 'Injected unavailable startup state'}; & $script:originalRead $Path }\n" +
+			"function Start-InstallRuntime([bool]$Mode) { $script:startAttempts++; $script:failState=($script:startAttempts -eq 1); & $script:originalStart $Mode }\n" +
+			"$failed=$false\ntry { Invoke-ZaslonInstaller @{Version=$TestVersion;PackagePath=$ZipFile;ChecksumPath=($ZipFile+'.sha256');InstallDirectory=$InstallTarget;ProfileDirectory=$TestProfile;NoShortcut=$true;Headless=$true} } catch { if($_.Exception.Message -notmatch 'did not confirm startup'){throw}; $failed=$true }\n" +
+			"if(-not $failed -or $script:startAttempts -ne 2){throw 'Rollback did not restart the previous instance'}\n"
+		if e = os.WriteFile(rollbackScript, []byte(body), 0600); e != nil {
+			return e
+		}
+		version, e := os.ReadFile(filepath.Join(repo, "VERSION"))
+		if e != nil {
+			return e
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		rollback := hidden(exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", rollbackScript,
+			"-InstallerSource", filepath.Join(repo, "scripts", "install.ps1"), "-ZipFile", *installerPackage,
+			"-InstallTarget", installDir, "-TestProfile", profile, "-TestVersion", strings.TrimSpace(string(version))))
+		rollbackOutput, rollbackErr := rollback.CombinedOutput()
+		cancel()
+		if e = os.WriteFile(filepath.Join(*root, "installer-rollback.log"), rollbackOutput, 0600); e != nil {
+			return e
+		}
+		if rollbackErr != nil {
+			return fmt.Errorf("live installer rollback: %w: %s", rollbackErr, rollbackOutput)
+		}
+		receiptAfter, e := os.ReadFile(filepath.Join(installDir, "install-receipt.json"))
+		if e != nil || !bytes.Equal(receiptBefore, receiptAfter) {
+			return errors.New("live rollback did not restore the original receipt/files")
+		}
+		for name, n := range baseline {
+			if size(hearts[name]) != n {
+				return fmt.Errorf("%s ran during installer rollback", name)
+			}
+		}
+		if !held("ac", "ag", "b", "bc") {
+			return errors.New("live installer rollback lost suspension ownership")
+		}
+		result.Checks = append(result.Checks, "failed installer startup restores and restarts the old version while every protected fixture remains suspended")
+		if err = install(false); err != nil {
+			return err
+		}
+		afterConfig, e := os.ReadFile(filepath.Join(profile, "config.yaml"))
+		if e != nil || !bytes.Equal(beforeConfig, afterConfig) {
+			return errors.New("installer changed settings")
+		}
+		for name, n := range baseline {
+			if size(hearts[name]) != n {
+				return fmt.Errorf("%s ran during installer handoff", name)
+			}
+		}
+		if !held("ac", "ag", "b", "bc") {
+			return errors.New("installer changed confirmed suspension ownership")
+		}
+		all, e := backend.List()
+		if e != nil {
+			return e
+		}
+		candidates := map[int]procs.Proc{}
+		for _, p := range all {
+			if strings.EqualFold(p.Path, paths["zaslon"]) {
+				candidates[p.PID] = p
+			}
+		}
+		if len(candidates) != 2 {
+			return errors.New("installer did not restart supervisor and worker")
+		}
+		for _, p := range candidates {
+			if _, child := candidates[p.PPID]; !child {
+				activeSupervisor = p.PID
+			}
+		}
+		if activeSupervisor == guard.Process.Pid {
+			return errors.New("installer kept the old supervisor")
+		}
+		if err = checkBeats([]string{"control"}, []string{"ac", "ag", "b", "bc"}); err != nil {
+			return err
+		}
+		result.Checks = append(result.Checks, "PowerShell installer replaces the active supervisor/worker and helper, preserves settings and all four paused fixtures without a heartbeat advance")
+	}
 	modeA.Store(5)
 	modeB.Store(5)
 	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
@@ -851,7 +989,7 @@ func scenario(repo string, result *report) (err error) {
 	if err = waitFor("refreeze fixtures for independent emergency resume", 8*time.Second, func() bool { return held("ac", "ag", "b", "bc") }); err != nil {
 		return err
 	}
-	if err = crashGuard(guard.Process.Pid); err != nil {
+	if err = crashGuard(activeSupervisor); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
