@@ -10,6 +10,8 @@
 
 <p align="center">
   <a href="README.md">Русский</a> ·
+  <a href="#windows-installation">Windows</a> ·
+  <a href="#linux-and-macos-installation">Linux/macOS</a> ·
   <a href="#build-from-source">Build</a> ·
   <a href="#recovery-after-a-crash">Recovery</a> ·
   <a href="docs/NETWORK-CHECKS.md">Network checks (Russian)</a> ·
@@ -30,15 +32,16 @@ traffic restrictions at the network layer requires a separate, tested filter.
 
 ## Project status
 
-Development takes place on `dev`. There are no validated Zaslon releases for daily
-use yet. A PowerShell installer is prepared for Windows; self-update remains
-disabled. Releases are built manually and default to drafts.
+The first prerelease, [Zaslon 0.3.0](https://github.com/avazar/zaslon/releases/tag/v0.3.0),
+includes installers for Windows, Linux, and macOS. It is intended for testing;
+readiness for daily use has not been established. Development takes place on
+`dev`, and self-update remains disabled.
 
 | Platform | Validated stages |
 |---|---|
 | Windows | Native tests, `go vet`, builds, and ready-EXE checks in CI. Suspension of a test app and its child, protection recovery after a crash, and emergency resumption. IPv4 VPN loss and reconnection also tested in a Windows 11 VM. |
-| Linux | GitHub Actions passed native tests, `go vet`, the race detector, app and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash. |
-| macOS | GitHub Actions passed native tests, `go vet`, the race detector, universal GUI bundle and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash. |
+| Linux | GitHub Actions passed native tests, `go vet`, the race detector, app and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash; installation, update, and removal were checked in an isolated HOME without starting protection. Native execution used AMD64. |
+| macOS | GitHub Actions on Intel passed native tests, `go vet`, the race detector, universal GUI bundle and recovery-helper builds, and the version command. Tests exercised suspension of a test process and recovery after a crash; installation, update, removal, and the copied app's signature were checked in an isolated HOME without starting protection. Native Apple Silicon execution is still unverified. |
 
 [CI on all three OSes](https://github.com/avazar/zaslon/actions/workflows/ci.yml)
 checks tests, builds, and package contents. It does not validate GUI interaction
@@ -221,22 +224,29 @@ may change, resulting in an uncertain check.
 
 ## Windows installation
 
-The first release has not been published yet. Once the `v0.3.0` prerelease is
-published, run this in a regular PowerShell window:
+To install version `0.3.0`, run this in a regular PowerShell window:
 
 ```powershell
 & ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v0.3.0/install.ps1')))
 ```
 
-The URL will fail until the asset is published. Each release installer is pinned
-to its version. PowerShell 5.1+ and Windows AMD64/ARM64 are required; administrator
+Each release installer is pinned to its version and selects your computer's
+architecture. PowerShell 5.1+ and Windows AMD64/ARM64 are required; administrator
 rights are unnecessary.
 
 The installer verifies archive and file SHA-256 checksums, installs both programs
 in `%LOCALAPPDATA%\Programs\Zaslon`, and creates a Start menu shortcut.
 Settings stay in `%APPDATA%\Zaslon`. The first launch of a new profile enables
 autostart, which can be disabled in the menu. No apps are initially selected.
-Manual ZIP extraction remains available.
+The installed app starts automatically. Use the **Zaslon** Start menu shortcut
+for later launches. Append `-NoStart` after the command's final parenthesis to
+install without launching.
+
+For manual installation, download the Windows ZIP for your architecture (usually
+`amd64`, or `arm64` for Windows on ARM) from the
+[release page](https://github.com/avazar/zaslon/releases/tag/v0.3.0), extract the
+entire archive to a permanent folder, and run `zaslon.exe`.
+Keep `zaslon-recover.exe` beside the app.
 
 Run a newer release's installer to update. Settings and recovery records are
 preserved; previous files and a settings copy remain in an adjacent
@@ -259,7 +269,7 @@ under this requirement.
 
 ## Linux and macOS installation
 
-Releases include a version-pinned `install.sh`. After publication:
+Download and run the version-pinned `0.3.0` installer:
 
 ```sh
 curl -fL https://github.com/avazar/zaslon/releases/download/v0.3.0/install.sh -o install.sh
@@ -267,12 +277,16 @@ sh install.sh
 ```
 
 Run as your regular user, without `sudo`. Requires `curl`, `tar` on Linux or
-`unzip` on macOS, and `sha256sum` or `shasum`. Linux supports AMD64/ARM64;
-macOS uses the universal Intel/Apple Silicon package.
+`unzip` on macOS, and `sha256sum` or `shasum`. The installer selects Linux
+AMD64/ARM64 or the macOS universal Intel/Apple Silicon package. Linux requires
+kernel 5.3+ with available `pidfd_open`/`pidfd_send_signal`.
 
 Linux files go to `${XDG_DATA_HOME:-~/.local/share}/zaslon/program`, with commands
 in `~/.local/bin` and a desktop entry. macOS files go to
 `~/Library/Application Support/Zaslon/program`, linked from `~/Applications/Zaslon.app`.
+The app starts automatically after installation. For later launches, use the
+application menu or `~/.local/bin/zaslon` on Linux; on macOS, open
+`~/Applications/Zaslon.app` or run `open "$HOME/Applications/Zaslon.app"`.
 
 Use `--no-start` to install without launching or `--headless` to run without a tray.
 Close protected apps and quit Zaslon before updating: the Unix installer refuses
@@ -285,8 +299,21 @@ records block removal; emergency resumption is separate. Settings and backups re
 The macOS app is ad-hoc signed, without Developer ID or notarization.
 Desktop sessions and real network failures still need manual testing.
 
-Draft assets require authentication. Download them with `gh release download`
-and pass `--package <archive> --checksums ./SHA256SUMS.txt` for offline testing.
+To install from previously downloaded files, get `install.sh`, `SHA256SUMS.txt`,
+and your OS archive from the [release page](https://github.com/avazar/zaslon/releases/tag/v0.3.0)
+into one directory. Linux AMD64 example without starting protection:
+
+```sh
+sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+```
+
+For Linux ARM64, replace `amd64` with `arm64`. On macOS, use
+`zaslon-0.3.0-macos-universal.zip`. For offline removal, supply the same
+`--package` and `--checksums` options and add `--uninstall`.
+
+New profiles do not protect any app automatically. Open the panel, configure
+allowed IPs/countries, then enable the apps you want to protect.
+Linux/macOS support remains preliminary pending desktop and real network tests.
 
 ## Build from source
 
