@@ -66,6 +66,19 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: bash ./scripts/Test-UnixInstaller.sh
+      - name: Unix pipe bootstrap (mocked downloads)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash ./scripts/Test-Bootstrap.sh
+      - name: Windows pipe bootstrap (PowerShell 5.1 and 7, isolated directories)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = "dist/zaslon-$version-windows-amd64.zip"
+          ./scripts/Test-Bootstrap.ps1 -WindowsPackage $package
+          pwsh -NoProfile -File ./scripts/Test-Bootstrap.ps1 -WindowsPackage $package
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 bootstrap tests failed.' }
       - name: Installer offline transactions (isolated Windows directories)
         if: runner.os == 'Windows'
         shell: powershell

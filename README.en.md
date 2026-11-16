@@ -224,14 +224,15 @@ may change, resulting in an uncertain check.
 
 ## Windows installation
 
-To install version `1.3.0`, run this in a regular PowerShell window:
+Install or update from a regular PowerShell window:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v1.3.0/install.ps1')))
+irm https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1 | iex
 ```
 
-Each release installer is pinned to its version and selects your computer's
-architecture. PowerShell 5.1+ and Windows AMD64/ARM64 are required; administrator
+The command selects the published version (currently `1.3.0`), verifies the
+installer's SHA-256, and selects your computer's architecture.
+PowerShell 5.1+ and Windows AMD64/ARM64 are required; administrator
 rights are unnecessary.
 
 The installer verifies archive and file SHA-256 checksums, installs both programs
@@ -239,8 +240,11 @@ in `%LOCALAPPDATA%\Programs\Zaslon`, and creates a Start menu shortcut.
 Settings stay in `%APPDATA%\Zaslon`. The first launch of a new profile enables
 autostart, which can be disabled in the menu. No apps are initially selected.
 The installed app starts automatically. Use the **Zaslon** Start menu shortcut
-for later launches. Append `-NoStart` after the command's final parenthesis to
-install without launching.
+for later launches. To choose a specific version and install without launching:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1))) -Version 1.3.0 -NoStart
+```
 
 For manual installation, download the Windows ZIP for your architecture (usually
 `amd64`, or `arm64` for Windows on ARM) from the
@@ -248,14 +252,19 @@ For manual installation, download the Windows ZIP for your architecture (usually
 entire archive to a permanent folder, and run `zaslon.exe`.
 Keep `zaslon-recover.exe` beside the app.
 
-Run a newer release's installer to update. Settings and recovery records are
+Run the installation command again to update. Settings and recovery records are
 preserved; previous files and a settings copy remain in an adjacent
 `Zaslon.backup-*` directory. Normal quit/resume is avoided: the new process adopts
 the journal and awaits fresh checks under the existing rules. If startup cannot
 be confirmed, the installer attempts to restore the old files and restart the old
 instance. After interruption, rerunning it first handles the pending transaction.
 
-To uninstall, quit Zaslon through its menu, then append `-Uninstall` to the command.
+To uninstall, quit Zaslon through its menu, then run:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1))) -Uninstall
+```
+
 Uninstall refuses unresolved suspensions; emergency resumption remains separate.
 Settings, backups, and unrelated files are retained. An unmanaged manual ZIP
 installation is not overwritten.
@@ -269,14 +278,15 @@ under this requirement.
 
 ## Linux and macOS installation
 
-Download and run the version-pinned `1.3.0` installer:
+Install or update with one command:
 
 ```sh
-curl -fL https://github.com/avazar/zaslon/releases/download/v1.3.0/install.sh -o install.sh
-sh install.sh
+curl -fsSL https://raw.githubusercontent.com/avazar/zaslon/dev/install.sh | sh
 ```
 
-Run as your regular user, without `sudo`. Requires `curl`, `tar` on Linux or
+The command selects the published version (currently `1.3.0`) and verifies the
+installer's SHA-256. Run as your regular user, without `sudo`.
+Requires `curl`, `tar` on Linux or
 `unzip` on macOS, and `sha256sum` or `shasum`. The installer selects Linux
 AMD64/ARM64 or the macOS universal Intel/Apple Silicon package. Linux requires
 kernel 5.3+ with available `pidfd_open`/`pidfd_send_signal`.
@@ -288,14 +298,21 @@ The app starts automatically after installation. For later launches, use the
 application menu or `~/.local/bin/zaslon` on Linux; on macOS, open
 `~/Applications/Zaslon.app` or run `open "$HOME/Applications/Zaslon.app"`.
 
-Use `--no-start` to install without launching or `--headless` to run without a tray.
+Pass options after `sh -s --`: `--no-start` installs without launching,
+`--headless` runs without a tray, and `--version 1.3.0` selects a specific release.
 Close protected apps and quit Zaslon before updating: the Unix installer refuses
 an active profile and never signals processes. Settings and recovery records are
 retained; old files and a settings copy remain in `program.backup-*`.
 Rerunning handles interrupted directory swaps.
 
-To uninstall, quit Zaslon and run `sh install.sh --uninstall`. Unresolved recovery
-records block removal; emergency resumption is separate. Settings and backups remain.
+To uninstall, quit Zaslon and run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/avazar/zaslon/dev/install.sh | sh -s -- uninstall
+```
+
+Unresolved recovery records block removal; emergency resumption is separate.
+Settings and backups remain.
 The macOS app is ad-hoc signed, without Developer ID or notarization.
 Desktop sessions and real network failures still need manual testing.
 

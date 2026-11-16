@@ -28,7 +28,40 @@ case "$(uname -s)" in
     launcher="$HOME/.local/bin/zaslon";;
   *) echo 'Native Unix test only.' >&2; exit 2;;
 esac
-install() { sh "$repo/scripts/install.sh" --version "$version" --package "$archive" --checksums "$archive.sha256" --no-start "$@"; }
+# Exercise the public pipe entry point with the real installer and offline package.
+# curl serves only the two local release fixtures; no external downloads are made.
+mkdir -p "$test_root/bin"
+export ZASLON_TEST_INSTALLER_VERSION="$version"
+export ZASLON_TEST_INSTALLER_SCRIPT="$test_root/release-install.sh"
+export ZASLON_TEST_INSTALLER_SUMS="$test_root/release-sums.txt"
+sed "s/__ZASLON_VERSION__/$version/g" "$repo/scripts/install.sh" > "$ZASLON_TEST_INSTALLER_SCRIPT"
+if command -v sha256sum >/dev/null 2>&1; then
+  installer_hash="$(sha256sum "$ZASLON_TEST_INSTALLER_SCRIPT" | awk '{print $1}')"
+else installer_hash="$(shasum -a 256 "$ZASLON_TEST_INSTALLER_SCRIPT" | awk '{print $1}')"; fi
+printf '%s  install.sh\n' "$installer_hash" > "$ZASLON_TEST_INSTALLER_SUMS"
+cat > "$test_root/bin/curl" <<'CURL'
+#!/bin/sh
+set -eu
+url=''; output=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output=$2; shift 2;;
+    --proto|--connect-timeout|--max-time) shift 2;;
+    -fsSL|--tlsv1.2) shift;;
+    https://*) url=$1; shift;;
+    *) echo "Unexpected curl argument: $1" >&2; exit 2;;
+  esac
+done
+base="https://github.com/avazar/zaslon/releases/download/v$ZASLON_TEST_INSTALLER_VERSION"
+case "$url" in
+  "$base/install.sh") cp "$ZASLON_TEST_INSTALLER_SCRIPT" "$output";;
+  "$base/SHA256SUMS.txt") cp "$ZASLON_TEST_INSTALLER_SUMS" "$output";;
+  *) echo "Unexpected external request: $url" >&2; exit 2;;
+esac
+CURL
+chmod 700 "$test_root/bin/curl"
+export PATH="$test_root/bin:$PATH"
+install() { cat "$repo/install.sh" | sh -s -- --version "$version" --package "$archive" --checksums "$archive.sha256" --no-start "$@"; }
 # Existing user launchers must never be replaced.
 mkdir -p "$(dirname "$launcher")"
 printf 'keep user data\n' > "$launcher"
