@@ -24,7 +24,7 @@
    gh workflow run release.yml --ref v0.3.0 -F publish=false
    ```
 4. Проверьте черновик: пять архивов (Windows/Linux AMD64/ARM64, macOS universal),
-   контрольные суммы, `install.ps1`, общий `SHA256SUMS.txt` и заметки выпуска.
+   контрольные суммы, `install.ps1`, `install.sh`, общий `SHA256SUMS.txt` и заметки выпуска.
 5. После приёмки опубликуйте черновик как предварительный выпуск.
    `publish: true` нужен только для сознательной публикации сразу после сборки.
    Существующий выпуск workflow не перезаписывает.
@@ -33,9 +33,26 @@ CI выполняет нативные тесты, сборку и провер�
 офлайн-тесты установщика и передачу работающей защиты на Windows.
 Происхождение архивов, установщика и общего списка сумм записывается через
 GitHub artifact attestations. Самообновление остаётся отключённым.
+Linux/macOS дополнительно проходят `scripts/Test-UnixInstaller.sh` с частным
+HOME/XDG и без запуска защиты. Проверяются обновление, ярлыки, сохранность
+конфига/журнала, безопасное удаление и macOS-подпись после копирования.
 
 Установщик получает версию при сборке через `go run ./tools/release`.
-Шаблон `scripts/install.ps1` при локальном запуске требует явного `-Version`.
+Шаблоны требуют явного `-Version` (PowerShell) либо `--version` (sh).
+
+Черновики доступны через авторизованный GitHub CLI. Пример Linux AMD64:
+
+```sh
+gh release download v0.3.0 --repo avazar/zaslon --dir zaslon-test --pattern install.sh --pattern SHA256SUMS.txt --pattern 'zaslon-0.3.0-linux-*.tar.gz'
+cd zaslon-test
+sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+~/.local/bin/zaslon
+```
+
+Для ARM64 выберите соответствующий архив. Офлайн-удаление выполняется тем же
+скриптом и пакетом, с добавленным `--uninstall` после выхода из приложения.
+Явный режим установки helper не запускает защиту. Обычные режимы восстановления
+сохраняют независимость от сети и config.yaml.
 
 Офлайн-проверка Windows после сборки пакетов:
 

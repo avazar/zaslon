@@ -1,4 +1,5 @@
-// zaslon-recover does not read config.yaml, start the guard, or use the network.
+// Recovery never reads config.yaml, starts the guard, or uses the network.
+// Explicit Unix installation mode only verifies and replaces program files.
 package main
 
 import (
@@ -9,6 +10,7 @@ import (
 	"github.com/avazar/zaslon/internal/app"
 	"github.com/avazar/zaslon/internal/procs"
 	"github.com/avazar/zaslon/internal/recovery"
+	"github.com/avazar/zaslon/internal/setup"
 	"github.com/gofrs/flock"
 )
 
@@ -19,6 +21,11 @@ func main() {
 	dir := flag.String("dir", app.Dir(), "Zaslon profile directory (or ZASLON_DIR)")
 	resume := flag.Bool("resume", false, "resume confirmed Zaslon suspensions; apps may access the current network")
 	terminate := flag.Bool("terminate", false, "terminate recorded processes, including uncertain operations; unsaved work is lost")
+	archive := flag.String("install-archive", "", "install a verified Unix archive without signalling processes")
+	target := flag.String("install-dir", "", "managed Unix installation directory")
+	packageVersion := flag.String("package-version", "", "expected version, matching this helper")
+	uninstall := flag.Bool("uninstall", false, "remove a managed Unix installation")
+	noLinks := flag.Bool("no-links", false, "skip application launchers")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("zaslon-recover", version)
@@ -27,6 +34,25 @@ func main() {
 	if *resume && *terminate {
 		fmt.Fprintln(os.Stderr, "Choose -resume or -terminate, not both.")
 		os.Exit(2)
+	}
+	if *archive != "" || *uninstall {
+		custom := os.Getenv("ZASLON_DIR") != ""
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "dir" {
+				custom = true
+			}
+		})
+		if *resume || *terminate || (*uninstall && *archive != "") || (!*uninstall && *packageVersion != version) || (custom && !*noLinks) {
+			fmt.Fprintln(os.Stderr, "Invalid installer options: keep recovery actions separate, use the matching helper version, and use -no-links for custom profiles.")
+			os.Exit(2)
+		}
+		err := setup.Run(setup.Options{Archive: *archive, Target: *target, Profile: *dir, Version: *packageVersion, Uninstall: *uninstall, NoLinks: *noLinks})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("Program files updated. Settings, recovery records and previous-version backups were preserved.")
+		return
 	}
 	if err := recoverProcesses(*dir, *resume, *terminate); err != nil {
 		fmt.Fprintln(os.Stderr, err)

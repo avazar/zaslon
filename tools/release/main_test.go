@@ -20,7 +20,7 @@ func TestAssembleCompleteRelease(t *testing.T) {
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "SHA256SUMS.txt"))
 	lines := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	if len(lines) != 6 {
+	if len(lines) != 7 {
 		t.Fatalf("manifest contains %d entries", len(lines))
 	}
 	for _, line := range lines {
@@ -70,6 +70,9 @@ func releaseFixture(t *testing.T) (string, string) {
 	}
 	template := filepath.Join(t.TempDir(), "install.ps1")
 	if err := os.WriteFile(template, []byte("param($Version='__ZASLON_VERSION__')"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(template), "install.sh"), []byte("#!/bin/sh\r\nversion='__ZASLON_VERSION__'\r\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return dir, template

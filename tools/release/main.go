@@ -1,4 +1,4 @@
-// release assembles verified CI archives and a version-pinned Windows installer.
+// release assembles verified CI archives and version-pinned installer scripts.
 // It never creates tags or publishes a release.
 package main
 
@@ -59,7 +59,7 @@ func assemble(dir, version, installer string) error {
 		return errors.New("version must be x.y.z")
 	}
 	names := archiveNames(version)
-	allowed := map[string]bool{"install.ps1": true, "SHA256SUMS.txt": true}
+	allowed := map[string]bool{"install.ps1": true, "install.sh": true, "SHA256SUMS.txt": true}
 	for _, name := range names {
 		allowed[name], allowed[name+".sha256"] = true, true
 	}
@@ -89,24 +89,38 @@ func assemble(dir, version, installer string) error {
 		}
 		sums[name] = hash
 	}
-	template, err := regularFile(installer)
-	if err != nil {
-		return err
+	scripts := map[string][]byte{}
+	for _, name := range []string{"install.ps1", "install.sh"} {
+		source := installer
+		if name == "install.sh" {
+			source = filepath.Join(filepath.Dir(installer), name)
+		}
+		template, err := regularFile(source)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(template), "__ZASLON_VERSION__") {
+			return errors.New("installer template has no version placeholder")
+		}
+		text := strings.ReplaceAll(string(template), "__ZASLON_VERSION__", version)
+		if name == "install.sh" {
+			text = strings.ReplaceAll(text, "\r\n", "\n")
+		}
+		script := []byte(text)
+		hash := sha256.Sum256(script)
+		scripts[name] = script
+		sums[name] = hex.EncodeToString(hash[:])
+		names = append(names, name)
 	}
-	if !strings.Contains(string(template), "__ZASLON_VERSION__") {
-		return errors.New("installer template has no version placeholder")
-	}
-	script := []byte(strings.ReplaceAll(string(template), "__ZASLON_VERSION__", version))
-	hash := sha256.Sum256(script)
-	sums["install.ps1"] = hex.EncodeToString(hash[:])
-	names = append(names, "install.ps1")
 	sort.Strings(names)
 	var manifest strings.Builder
 	for _, name := range names {
 		fmt.Fprintf(&manifest, "%s  %s\n", sums[name], name)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "install.ps1"), script, 0644); err != nil {
-		return err
+	for name, script := range scripts {
+		if err := os.WriteFile(filepath.Join(dir, name), script, 0644); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(filepath.Join(dir, "SHA256SUMS.txt"), []byte(manifest.String()), 0644)
 }

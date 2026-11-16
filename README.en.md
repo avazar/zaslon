@@ -257,6 +257,37 @@ under this requirement.
 
 [Release build instructions (Russian)](docs/RELEASING.md).
 
+## Linux and macOS installation
+
+Releases include a version-pinned `install.sh`. After publication:
+
+```sh
+curl -fL https://github.com/avazar/zaslon/releases/download/v0.3.0/install.sh -o install.sh
+sh install.sh
+```
+
+Run as your regular user, without `sudo`. Requires `curl`, `tar` on Linux or
+`unzip` on macOS, and `sha256sum` or `shasum`. Linux supports AMD64/ARM64;
+macOS uses the universal Intel/Apple Silicon package.
+
+Linux files go to `${XDG_DATA_HOME:-~/.local/share}/zaslon/program`, with commands
+in `~/.local/bin` and a desktop entry. macOS files go to
+`~/Library/Application Support/Zaslon/program`, linked from `~/Applications/Zaslon.app`.
+
+Use `--no-start` to install without launching or `--headless` to run without a tray.
+Close protected apps and quit Zaslon before updating: the Unix installer refuses
+an active profile and never signals processes. Settings and recovery records are
+retained; old files and a settings copy remain in `program.backup-*`.
+Rerunning handles interrupted directory swaps.
+
+To uninstall, quit Zaslon and run `sh install.sh --uninstall`. Unresolved recovery
+records block removal; emergency resumption is separate. Settings and backups remain.
+The macOS app is ad-hoc signed, without Developer ID or notarization.
+Desktop sessions and real network failures still need manual testing.
+
+Draft assets require authentication. Download them with `gh release download`
+and pass `--package <archive> --checksums ./SHA256SUMS.txt` for offline testing.
+
 ## Build from source
 
 ### Windows

@@ -62,6 +62,10 @@ jobs:
           for archive in "${archives[@]}"; do
             go run ./tools/package -verify "$archive" -smoke
           done
+      - name: Unix installer (isolated HOME, no application startup)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash ./scripts/Test-UnixInstaller.sh
       - name: Installer offline transactions (isolated Windows directories)
         if: runner.os == 'Windows'
         shell: powershell

@@ -30,6 +30,7 @@ import (
 	"github.com/avazar/zaslon/internal/netwatch"
 	"github.com/avazar/zaslon/internal/procs"
 	"github.com/avazar/zaslon/internal/recovery"
+	"github.com/avazar/zaslon/internal/setup"
 	"github.com/avazar/zaslon/internal/ui"
 	"github.com/avazar/zaslon/internal/update"
 	"github.com/avazar/zaslon/internal/window"
@@ -61,6 +62,15 @@ func run(tray bool) {
 	ui.Lang = app.Language("auto")
 	if supervise() {
 		return
+	}
+	installation, err := setup.AcquireRuntime()
+	if err != nil {
+		app.Logf("Protection startup refused: %v", err)
+		app.Notify("Zaslon", err.Error())
+		return
+	}
+	if installation != nil {
+		defer installation.Close()
 	}
 	// One instance only. A second one (double-click, autostart) just says where the first is.
 	lock := flock.New(app.LockPath())

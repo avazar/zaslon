@@ -265,6 +265,49 @@ base URL или дополнительные домены могут дать и
 
 [Подготовка выпусков](docs/RELEASING.md).
 
+## Установка на Linux и macOS
+
+В выпуск входит закреплённый за версией `install.sh`. После публикации:
+
+```sh
+curl -fL https://github.com/avazar/zaslon/releases/download/v0.3.0/install.sh -o install.sh
+sh install.sh
+```
+
+Запускайте от обычного пользователя, без `sudo`. Нужны `curl`, `tar` на Linux
+или `unzip` на macOS, а также `sha256sum` либо `shasum`.
+Поддерживаются Linux AMD64/ARM64 и macOS Intel/Apple Silicon.
+
+Linux устанавливается в `${XDG_DATA_HOME:-~/.local/share}/zaslon/program`;
+команды появляются в `~/.local/bin`, ярлык — в меню приложений.
+На macOS файлы находятся в `~/Library/Application Support/Zaslon/program`,
+приложение доступно через `~/Applications/Zaslon.app`.
+Настройки и журнал сохраняются отдельно от заменяемых файлов.
+
+`--no-start` устанавливает без запуска, `--headless` запускает без трея.
+Перед обновлением закройте защищаемые приложения и выйдите из Zaslon:
+Unix-установщик не останавливает процессы и отказывается менять занятый профиль.
+Предыдущие файлы и копия настроек сохраняются в `program.backup-*`.
+Прерванная замена обрабатывается при следующем запуске установщика.
+
+Удаление: `sh install.sh --uninstall` после выхода из Zaslon. При оставшихся
+записях восстановления оно запрещено; аварийное возобновление — отдельное действие.
+Настройки и бэкапы сохраняются. macOS-пакет имеет подпись ad-hoc,
+без Developer ID и нотариального заверения.
+
+Файлы черновика можно скачать авторизованным GitHub CLI. Пример Linux AMD64:
+
+```sh
+gh release download v0.3.0 --repo avazar/zaslon --dir zaslon-test --pattern install.sh --pattern SHA256SUMS.txt --pattern 'zaslon-0.3.0-linux-*.tar.gz'
+cd zaslon-test
+sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+~/.local/bin/zaslon
+```
+
+Для Linux ARM64 замените `amd64` на `arm64`. На macOS нужен архив
+`zaslon-0.3.0-macos-universal.zip`. GUI и реальные сетевые сценарии этих ОС
+требуют отдельной проверки; поддержка предварительная.
+
 ## Сборка из исходников
 
 
