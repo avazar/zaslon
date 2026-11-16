@@ -25,7 +25,8 @@ func AcquireRuntime() (io.Closer, error) {
 	return acquireRuntime(runtime.GOOS, exe)
 }
 func acquireRuntime(platform, exe string) (io.Closer, error) {
-	if _, err := os.Stat(exe); err != nil {
+	before, err := os.Stat(exe)
+	if err != nil {
 		return nil, errors.New("executable was removed; refusing to start protection")
 	}
 	resolved, err := filepath.EvalSymlinks(exe)
@@ -66,6 +67,11 @@ func acquireRuntime(platform, exe string) (io.Closer, error) {
 	if !ok {
 		lock.Close()
 		return nil, errors.New("installation is in progress; retry after it finishes")
+	}
+	after, err := os.Stat(exe)
+	if err != nil || !os.SameFile(before, after) {
+		lock.Close()
+		return nil, errors.New("installation changed during startup; retry using the installed version")
 	}
 	return lock, nil
 }
