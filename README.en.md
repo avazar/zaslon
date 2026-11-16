@@ -32,7 +32,7 @@ traffic restrictions at the network layer requires a separate, tested filter.
 
 ## Project status
 
-The first prerelease, [Zaslon 0.3.0](https://github.com/avazar/zaslon/releases/tag/v0.3.0),
+The first prerelease, [Zaslon 1.3.0](https://github.com/avazar/zaslon/releases/tag/v1.3.0),
 includes installers for Windows, Linux, and macOS. It is intended for testing;
 readiness for daily use has not been established. Development takes place on
 `dev`, and self-update remains disabled.
@@ -224,10 +224,10 @@ may change, resulting in an uncertain check.
 
 ## Windows installation
 
-To install version `0.3.0`, run this in a regular PowerShell window:
+To install version `1.3.0`, run this in a regular PowerShell window:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v0.3.0/install.ps1')))
+& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v1.3.0/install.ps1')))
 ```
 
 Each release installer is pinned to its version and selects your computer's
@@ -244,7 +244,7 @@ install without launching.
 
 For manual installation, download the Windows ZIP for your architecture (usually
 `amd64`, or `arm64` for Windows on ARM) from the
-[release page](https://github.com/avazar/zaslon/releases/tag/v0.3.0), extract the
+[release page](https://github.com/avazar/zaslon/releases/tag/v1.3.0), extract the
 entire archive to a permanent folder, and run `zaslon.exe`.
 Keep `zaslon-recover.exe` beside the app.
 
@@ -269,10 +269,10 @@ under this requirement.
 
 ## Linux and macOS installation
 
-Download and run the version-pinned `0.3.0` installer:
+Download and run the version-pinned `1.3.0` installer:
 
 ```sh
-curl -fL https://github.com/avazar/zaslon/releases/download/v0.3.0/install.sh -o install.sh
+curl -fL https://github.com/avazar/zaslon/releases/download/v1.3.0/install.sh -o install.sh
 sh install.sh
 ```
 
@@ -300,15 +300,15 @@ The macOS app is ad-hoc signed, without Developer ID or notarization.
 Desktop sessions and real network failures still need manual testing.
 
 To install from previously downloaded files, get `install.sh`, `SHA256SUMS.txt`,
-and your OS archive from the [release page](https://github.com/avazar/zaslon/releases/tag/v0.3.0)
+and your OS archive from the [release page](https://github.com/avazar/zaslon/releases/tag/v1.3.0)
 into one directory. Linux AMD64 example without starting protection:
 
 ```sh
-sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+sh install.sh --package ./zaslon-1.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
 ```
 
 For Linux ARM64, replace `amd64` with `arm64`. On macOS, use
-`zaslon-0.3.0-macos-universal.zip`. For offline removal, supply the same
+`zaslon-1.3.0-macos-universal.zip`. For offline removal, supply the same
 `--package` and `--checksums` options and add `--uninstall`.
 
 New profiles do not protect any app automatically. Open the panel, configure
@@ -340,7 +340,7 @@ downloads dependencies and the pinned `go-winres` tool. With a populated cache,
 building with access to Go proxy/sumdb disabled has been verified.
 
 Use `-GoExe` and `-ModuleCache` to supply explicit Go and module cache paths.
-The build version comes from `VERSION` (currently `0.3.0`) and is included in both
+The build version comes from `VERSION` (currently `1.3.0`) and is included in both
 EXEs and their Windows properties. Pass `-Version dev` for an unversioned build.
 
 ### Linux and macOS

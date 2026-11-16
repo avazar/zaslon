@@ -19,7 +19,7 @@ import (
 func fixtureArchive(t *testing.T, platform, mutation string) string {
 	t.Helper()
 	p := payload{
-		"VERSION": {[]byte("0.3.0\n"), 0644}, "LICENSE": {[]byte("MIT\n"), 0644}, "README.txt": {[]byte("instructions\n"), 0644},
+		"VERSION": {[]byte("1.3.0\n"), 0644}, "LICENSE": {[]byte("MIT\n"), 0644}, "README.txt": {[]byte("instructions\n"), 0644},
 		executable(platform, "zaslon"): {[]byte("fixture main"), 0755}, executable(platform, "zaslon-recover"): {[]byte("fixture helper"), 0755},
 	}
 	if platform == "darwin" {
@@ -88,7 +88,7 @@ func fixtureArchive(t *testing.T, platform, mutation string) string {
 func options(t *testing.T, platform string) Options {
 	t.Helper()
 	root := t.TempDir()
-	return Options{Archive: fixtureArchive(t, platform, ""), Target: filepath.Join(root, "program space"), Profile: filepath.Join(root, "profile"), Version: "0.3.0", NoLinks: true}
+	return Options{Archive: fixtureArchive(t, platform, ""), Target: filepath.Join(root, "program space"), Profile: filepath.Join(root, "profile"), Version: "1.3.0", NoLinks: true}
 }
 func canonical(t *testing.T, o Options) Options {
 	t.Helper()

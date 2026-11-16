@@ -11,11 +11,11 @@ import (
 
 func TestAssembleCompleteRelease(t *testing.T) {
 	dir, template := releaseFixture(t)
-	if err := assemble(dir, "0.3.0", template); err != nil {
+	if err := assemble(dir, "1.3.0", template); err != nil {
 		t.Fatal(err)
 	}
 	script, _ := os.ReadFile(filepath.Join(dir, "install.ps1"))
-	if strings.Contains(string(script), "__ZASLON_VERSION__") || !strings.Contains(string(script), "'0.3.0'") {
+	if strings.Contains(string(script), "__ZASLON_VERSION__") || !strings.Contains(string(script), "'1.3.0'") {
 		t.Fatal("installer is not version pinned")
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "SHA256SUMS.txt"))
@@ -35,7 +35,7 @@ func TestRejectIncompleteOrModifiedAssets(t *testing.T) {
 	for _, scenario := range []string{"missing-package", "wrong-checksum", "foreign-asset", "invalid-version"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir, template := releaseFixture(t)
-			version := "0.3.0"
+			version := "1.3.0"
 			name := archiveNames(version)[0]
 			switch scenario {
 			case "missing-package":
@@ -59,7 +59,7 @@ func TestRejectIncompleteOrModifiedAssets(t *testing.T) {
 func releaseFixture(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	for _, name := range archiveNames("0.3.0") {
+	for _, name := range archiveNames("1.3.0") {
 		b := []byte(name)
 		if err := os.WriteFile(filepath.Join(dir, name), b, 0644); err != nil {
 			t.Fatal(err)

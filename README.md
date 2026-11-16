@@ -33,7 +33,7 @@ Zaslon проверяет внешний IP по заданным правила
 
 ## Состояние проекта
 
-Доступен первый предварительный выпуск [Zaslon 0.3.0](https://github.com/avazar/zaslon/releases/tag/v0.3.0)
+Доступен первый предварительный выпуск [Zaslon 1.3.0](https://github.com/avazar/zaslon/releases/tag/v1.3.0)
 с установщиками для Windows, Linux и macOS. Он предназначен для проверки;
 готовность к повседневному использованию пока не подтверждена. Разработка
 ведётся в ветке `dev`, самообновление отключено.
@@ -230,10 +230,10 @@ base URL или дополнительные домены могут дать и
 
 ## Установка на Windows
 
-Для установки версии `0.3.0` выполните в обычном PowerShell:
+Для установки версии `1.3.0` выполните в обычном PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v0.3.0/install.ps1')))
+& ([scriptblock]::Create((Invoke-RestMethod 'https://github.com/avazar/zaslon/releases/download/v1.3.0/install.ps1')))
 ```
 
 Скрипт закреплён за версией выпуска и сам выбирает архитектуру компьютера.
@@ -248,7 +248,7 @@ base URL или дополнительные домены могут дать и
 после последней скобки команды.
 
 Для ручной установки скачайте Windows ZIP своей архитектуры (обычно `amd64`,
-для Windows на ARM — `arm64`) со [страницы выпуска](https://github.com/avazar/zaslon/releases/tag/v0.3.0),
+для Windows на ARM — `arm64`) со [страницы выпуска](https://github.com/avazar/zaslon/releases/tag/v1.3.0),
 распакуйте весь архив в постоянную папку и запустите `zaslon.exe`.
 Оставьте `zaslon-recover.exe` рядом с приложением.
 
@@ -275,10 +275,10 @@ base URL или дополнительные домены могут дать и
 
 ## Установка на Linux и macOS
 
-Скачайте закреплённый за версией `0.3.0` установщик и запустите его:
+Скачайте закреплённый за версией `1.3.0` установщик и запустите его:
 
 ```sh
-curl -fL https://github.com/avazar/zaslon/releases/download/v0.3.0/install.sh -o install.sh
+curl -fL https://github.com/avazar/zaslon/releases/download/v1.3.0/install.sh -o install.sh
 sh install.sh
 ```
 
@@ -308,16 +308,16 @@ Unix-установщик не останавливает процессы и о
 без Developer ID и нотариального заверения.
 
 Для установки из заранее скачанных файлов возьмите со
-[страницы выпуска](https://github.com/avazar/zaslon/releases/tag/v0.3.0)
+[страницы выпуска](https://github.com/avazar/zaslon/releases/tag/v1.3.0)
 `install.sh`, `SHA256SUMS.txt` и архив своей ОС в одну папку.
 Пример Linux AMD64 без запуска защиты:
 
 ```sh
-sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+sh install.sh --package ./zaslon-1.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
 ```
 
 Для Linux ARM64 замените `amd64` на `arm64`. На macOS нужен архив
-`zaslon-0.3.0-macos-universal.zip`. Для офлайн-удаления укажите те же
+`zaslon-1.3.0-macos-universal.zip`. Для офлайн-удаления укажите те же
 `--package` и `--checksums` и добавьте `--uninstall`.
 
 В новом профиле ни одно приложение не защищается автоматически. Откройте панель,
@@ -350,7 +350,7 @@ GUI и реальные сетевые сценарии Linux/macOS требую
 кэша сборка проверена без доступа к Go proxy/sumdb.
 
 Пути к Go и кэшу можно задать параметрами `-GoExe` и `-ModuleCache`.
-Номер сборки берётся из файла `VERSION` (сейчас `0.3.0`) и включается в обе EXE
+Номер сборки берётся из файла `VERSION` (сейчас `1.3.0`) и включается в обе EXE
 и их свойства Windows. Для сборки без номера версии передайте `-Version dev`.
 
 ### Linux и macOS

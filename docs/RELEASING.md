@@ -1,7 +1,7 @@
 # Подготовка выпуска
 
 Версия задаётся в `VERSION`. Workflow Release запускается вручную, принимает
-существующий тег вида `v0.3.0` и по умолчанию создаёт черновик предварительного
+существующий тег вида `v1.3.0` и по умолчанию создаёт черновик предварительного
 выпуска. Он не создаёт тег и не изменяет ветки.
 
 1. Проверьте выбранный коммит: CI трёх ОС, испытания готового пакета и ограничения.
@@ -9,11 +9,11 @@
 2. Создайте и отправьте тег на проверенном коммите:
 
    ```sh
-   git tag -a v0.3.0 -m "Zaslon 0.3.0"
-   git push origin v0.3.0
+   git tag -a v1.3.0 -m "Zaslon 1.3.0"
+   git push origin v1.3.0
    ```
 
-3. В Actions → Release → Run workflow выберите тег `v0.3.0` в
+3. В Actions → Release → Run workflow выберите тег `v1.3.0` в
    `Use workflow from` и оставьте `publish: false`.
    Тег должен совпадать с VERSION. Сборки используют проверенный SHA коммита;
    перенос тега во время сборки запрещает публикацию.
@@ -21,7 +21,7 @@
    и сведениями о происхождении артефактов. Через CLI:
 
    ```sh
-   gh workflow run release.yml --ref v0.3.0 -F publish=false
+   gh workflow run release.yml --ref v1.3.0 -F publish=false
    ```
 4. Проверьте черновик: пять архивов (Windows/Linux AMD64/ARM64, macOS universal),
    контрольные суммы, `install.ps1`, `install.sh`, общий `SHA256SUMS.txt` и заметки выпуска.
@@ -45,9 +45,9 @@ Apple Silicon. Нативное выполнение установщика на
 Черновики доступны через авторизованный GitHub CLI. Пример Linux AMD64:
 
 ```sh
-gh release download v0.3.0 --repo avazar/zaslon --dir zaslon-test --pattern install.sh --pattern SHA256SUMS.txt --pattern 'zaslon-0.3.0-linux-*.tar.gz'
+gh release download v1.3.0 --repo avazar/zaslon --dir zaslon-test --pattern install.sh --pattern SHA256SUMS.txt --pattern 'zaslon-1.3.0-linux-*.tar.gz'
 cd zaslon-test
-sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
+sh install.sh --package ./zaslon-1.3.0-linux-amd64.tar.gz --checksums ./SHA256SUMS.txt --no-start
 ~/.local/bin/zaslon
 ```
 
@@ -59,7 +59,7 @@ sh install.sh --package ./zaslon-0.3.0-linux-amd64.tar.gz --checksums ./SHA256SU
 Офлайн-проверка Windows после сборки пакетов:
 
 ```powershell
-.\scripts\Test-Installer.ps1 -WindowsPackage .\dist\zaslon-0.3.0-windows-amd64.zip
+.\scripts\Test-Installer.ps1 -WindowsPackage .\dist\zaslon-1.3.0-windows-amd64.zip
 ```
 
 Тест использует свои папки, не запускает защиту и не меняет ярлыки или автозапуск.

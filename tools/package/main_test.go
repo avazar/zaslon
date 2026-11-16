@@ -10,7 +10,7 @@ import (
 )
 
 func fixturePayload() payload {
-	p := payload{"zaslon.exe": {[]byte("test application"), 0755}, "zaslon-recover.exe": {[]byte("test recovery"), 0755}, "LICENSE": {[]byte("MIT\n"), 0644}, "README.txt": {[]byte("instructions\n"), 0644}, "VERSION": {[]byte("0.3.0\n"), 0644}}
+	p := payload{"zaslon.exe": {[]byte("test application"), 0755}, "zaslon-recover.exe": {[]byte("test recovery"), 0755}, "LICENSE": {[]byte("MIT\n"), 0644}, "README.txt": {[]byte("instructions\n"), 0644}, "VERSION": {[]byte("1.3.0\n"), 0644}}
 	p["SHA256SUMS.txt"] = entry{checksums(p), 0644}
 	return p
 }
@@ -41,12 +41,12 @@ func TestMissingRecoveryAndTamperedPayloadAreRejected(t *testing.T) {
 	p := fixturePayload()
 	delete(p, "zaslon-recover.exe")
 	p["SHA256SUMS.txt"] = entry{checksums(p), 0644}
-	if err := validate(p, spec{"0.3.0", "windows", "amd64"}); err == nil || !strings.Contains(err.Error(), "missing payload: zaslon-recover.exe") {
+	if err := validate(p, spec{"1.3.0", "windows", "amd64"}); err == nil || !strings.Contains(err.Error(), "missing payload: zaslon-recover.exe") {
 		t.Fatalf("missing recovery accepted: %v", err)
 	}
 	p = fixturePayload()
 	p["README.txt"] = entry{[]byte("tampered"), 0644}
-	if err := validate(p, spec{"0.3.0", "windows", "amd64"}); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if err := validate(p, spec{"1.3.0", "windows", "amd64"}); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("changed payload accepted: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestUnsafeAndDuplicateArchivePathsAreRejected(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte("0.3.0\n"))
+		_, _ = w.Write([]byte("1.3.0\n"))
 	}
 	_ = z.Close()
 	_ = f.Close()
@@ -80,13 +80,13 @@ func TestUnsafeAndDuplicateArchivePathsAreRejected(t *testing.T) {
 	}
 }
 func TestReleaseArchiveNames(t *testing.T) {
-	for _, s := range []spec{{"0.3.0", "windows", "amd64"}, {"0.3.0", "windows", "arm64"}, {"0.3.0", "linux", "amd64"}, {"0.3.0", "linux", "arm64"}, {"0.3.0", "darwin", "universal"}} {
+	for _, s := range []spec{{"1.3.0", "windows", "amd64"}, {"1.3.0", "windows", "arm64"}, {"1.3.0", "linux", "amd64"}, {"1.3.0", "linux", "arm64"}, {"1.3.0", "darwin", "universal"}} {
 		got, err := archiveSpec(archiveName(s))
 		if err != nil || got != s {
 			t.Fatalf("archive name roundtrip: %+v %v", got, err)
 		}
 	}
-	for _, name := range []string{"zaslon-0.3.0-windows-universal.zip", "zaslon-0.3.0-linux-amd64.zip", "zaslon-0.3.0-macos-amd64.zip", "zaslon-00.3.0-linux-amd64.tar.gz"} {
+	for _, name := range []string{"zaslon-1.3.0-windows-universal.zip", "zaslon-1.3.0-linux-amd64.zip", "zaslon-1.3.0-macos-amd64.zip", "zaslon-01.3.0-linux-amd64.tar.gz"} {
 		if _, err := archiveSpec(name); err == nil {
 			t.Fatalf("accepted %q", name)
 		}
