@@ -147,7 +147,7 @@ func (e *Events) Ignored() (uint64, string) {
 }
 
 // RefreshFilter may read OS metadata, so call it only outside the guard and
-// callbacks. It is requested when an initially unidentified interface appears.
+// callbacks. It handles discovery and revalidation of local-only interfaces.
 func (e *Events) RefreshFilter() string {
 	if e.refreshFilter == nil {
 		return ""

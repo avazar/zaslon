@@ -33,6 +33,7 @@ type Runner struct {
 	OnConfigError func(error)
 	traceIP       func(context.Context, string, time.Duration, bool) (netwatch.TraceResult, error)
 	ipv6Possible  func() (bool, error)
+	dnsResolver   func(context.Context) string
 }
 
 func NewRunner(ctx context.Context, cfg *config.Config, processes procs.Controller) *Runner {
@@ -56,13 +57,11 @@ func NewRunner(ctx context.Context, cfg *config.Config, processes procs.Controll
 	return r
 }
 
-func (r *Runner) probe(c *config.Config, id uint64, domains bool) func() {
+func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func() {
 	ctx, cancel := context.WithTimeout(r.ctx, 12*time.Second)
 	go func() {
 		defer cancel()
 		res := guard.ProbeResult{ID: id}
-		var v6 netwatch.IPResult
-		var err6 error = netwatch.ErrOffline
 		possible, possibleErr := false, error(nil)
 		if c.CheckIPv6 {
 			if r.ipv6Possible != nil {
@@ -80,107 +79,150 @@ func (r *Runner) probe(c *config.Config, id uint64, domains bool) func() {
 		type measurement struct {
 			endpoint string
 			result   guard.DomainResult
+			done     chan struct{}
 		}
 		var measurements []measurement
 		indices := map[string]int{}
-		if domains {
+		if len(plan.Apps) > 0 {
 			for _, t := range procs.Targets(c) {
-				if !c.DomainCheckEnabled(t.ID) {
+				if !plan.Apps[t.ID] || !c.DomainCheckEnabled(t.ID) {
 					continue
 				}
 				for _, endpoint := range c.DomainChecks[t.ID] {
 					active[t.ID] = append(active[t.ID], endpoint)
 					if _, seen := indices[endpoint]; !seen {
 						indices[endpoint] = len(measurements)
-						measurements = append(measurements, measurement{endpoint: endpoint})
+						measurements = append(measurements, measurement{endpoint: endpoint, done: make(chan struct{})})
 					}
 				}
 			}
 		}
-		var wg sync.WaitGroup
-		for i := range measurements {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				endpoint := measurements[i].endpoint
-				d := guard.DomainResult{Endpoint: endpoint, CheckedAt: time.Now()}
-				var parts sync.WaitGroup
-				parts.Add(1)
-				go func() {
-					defer parts.Done()
-					result, err := trace(ctx, endpoint, httpTimeout, false)
-					if err != nil {
-						d.Error = err.Error()
-						d.Timeout = isProbeTimeout(err)
-					} else {
-						d.IP, d.Country = result.IP, result.Country
-					}
-				}()
-				if c.CheckIPv6 && (possible || possibleErr != nil) {
-					parts.Add(1)
-					go func() {
-						defer parts.Done()
-						result, err := trace(ctx, endpoint, httpTimeout, true)
-						if err != nil && !errors.Is(err, netwatch.ErrNoIPv6) {
-							d.IPv6Error = err.Error()
-							d.IPv6Timeout = isProbeTimeout(err)
-						} else if err == nil {
-							d.IP6, d.Country6 = result.IP, result.Country
-						}
-					}()
-				}
-				parts.Wait()
-				measurements[i].result = d
-			}(i)
+		send := func(part guard.ProbeResult) {
+			if ctx.Err() != nil {
+				return
+			}
+			part.ID = id
+			select {
+			case r.results <- part:
+			case <-ctx.Done():
+			}
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var v4 netwatch.IPResult
-			v4, res.Err = netwatch.PublicIP(ctx, c.IPServices, httpTimeout, false)
-			res.IP, res.Votes, res.Others = v4.IP, v4.Votes, v4.Others
-		}()
-		if c.CheckIPv6 {
-			wg.Add(1)
+		var domainWG sync.WaitGroup
+		dnsReady := make(chan struct{})
+		for i := range measurements {
+			m := &measurements[i]
 			go func() {
-				defer wg.Done()
-				// One answer is enough here: the point is to see whether IPv6 goes around the VPN.
-				v6, err6 = netwatch.PublicIP(ctx, c.IPv6Services, httpTimeout, true)
+				defer close(m.done)
+				measure := func(v6 bool) guard.DomainResult {
+					for attempt := 0; ; attempt++ {
+						d := guard.DomainResult{Endpoint: m.endpoint, CheckedAt: time.Now()}
+						value, err := trace(ctx, m.endpoint, httpTimeout, v6)
+						if v6 {
+							if err == nil {
+								d.IP6, d.Country6 = value.IP, value.Country
+							} else if !errors.Is(err, netwatch.ErrNoIPv6) {
+								d.IPv6Error, d.IPv6Timeout = err.Error(), isProbeTimeout(err)
+							}
+						} else if err != nil {
+							d.Error, d.Timeout = err.Error(), isProbeTimeout(err)
+						} else {
+							d.IP, d.Country = value.IP, value.Country
+						}
+						part := guard.ProbeResult{Part: guard.DomainFamily, Sample: d, SampleIPv6: v6}
+						if attempt == 0 && (d.Timeout || d.IPv6Timeout) {
+							part.Retry = make(chan bool, 1)
+						}
+						send(part)
+						if part.Retry != nil {
+							select {
+							case retry := <-part.Retry:
+								if retry {
+									continue
+								}
+							case <-ctx.Done():
+							}
+						}
+						return d
+					}
+				}
+				var v6Result chan guard.DomainResult
+				if res.IPv6Possible {
+					v6Result = make(chan guard.DomainResult, 1)
+					go func() { v6Result <- measure(true) }()
+				}
+				d := measure(false)
+				if v6Result != nil {
+					v := <-v6Result
+					if v.CheckedAt.Before(d.CheckedAt) {
+						d.CheckedAt = v.CheckedAt
+					}
+					d.IP6, d.Country6, d.IPv6Error, d.IPv6Timeout = v.IP6, v.Country6, v.IPv6Error, v.IPv6Timeout
+				}
+				m.result = d
 			}()
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			res.NetID = netwatch.NetworkID()
-			if c.DNSCheck != "off" {
-				dnsCtx, dnsCancel := context.WithTimeout(ctx, httpTimeout)
-				res.DNS = netwatch.DNSResolver(dnsCtx)
-				dnsCancel()
+		for app, endpoints := range active {
+			domainWG.Go(func() {
+				values := make([]guard.DomainResult, 0, len(endpoints))
+				for _, endpoint := range endpoints {
+					m := &measurements[indices[endpoint]]
+					<-m.done
+					values = append(values, m.result)
+				}
+				part := guard.ProbeResult{Part: guard.DomainGroup, Domains: map[string][]guard.DomainResult{app: values}, IPv6Possible: res.IPv6Possible}
+				if c.DNSCheck == "block" {
+					<-dnsReady
+					part.DNS, part.DNSCountry = res.DNS, res.DNSCountry
+				}
+				send(part)
+			})
+		}
+		var wg sync.WaitGroup
+		if plan.General {
+			wg.Go(func() {
+				v4, err := netwatch.PublicIP(ctx, c.IPServices, httpTimeout, false)
+				res.IP, res.Votes, res.Others, res.Err = v4.IP, v4.Votes, v4.Others, err
+				if err == nil {
+					res.Country = r.geo.Country(ctx, v4.IP, httpTimeout)
+				}
+			})
+			if c.CheckIPv6 {
+				wg.Go(func() {
+					v6, err := netwatch.PublicIP(ctx, c.IPv6Services, httpTimeout, true)
+					if err == nil {
+						res.IP6 = v6.IP
+						res.IPv6Conflicting = len(v6.Others) != 0
+						res.Country6 = r.geo.Country(ctx, v6.IP, httpTimeout)
+					} else {
+						res.IPv6Unknown = res.IPv6Possible
+					}
+				})
 			}
-		}()
+			wg.Go(func() { res.NetID = netwatch.NetworkID() })
+		}
+		wg.Go(func() {
+			defer close(dnsReady)
+			if c.DNSCheck == "block" || (plan.General && c.DNSCheck == "warn") {
+				dnsCtx, stop := context.WithTimeout(ctx, httpTimeout)
+				resolve := r.dnsResolver
+				if resolve == nil {
+					resolve = netwatch.DNSResolver
+				}
+				res.DNS = resolve(dnsCtx)
+				stop()
+				if res.DNS != "" {
+					res.DNSCountry = r.geo.Country(ctx, res.DNS, httpTimeout)
+				}
+			}
+		})
 		wg.Wait()
-		// Geolocation must not serialize several four-second failures ahead of
-		// already completed service checks. Trace responses supply their own loc.
-		var geoWG sync.WaitGroup
-		if res.Err == nil {
-			geoWG.Add(1)
-			go func() { defer geoWG.Done(); res.Country = r.geo.Country(ctx, res.IP, httpTimeout) }()
-		}
-		if res.DNS != "" {
-			geoWG.Add(1)
-			go func() { defer geoWG.Done(); res.DNSCountry = r.geo.Country(ctx, res.DNS, httpTimeout) }()
-		}
-		if err6 == nil {
-			res.IP6 = v6.IP
-			// A conflicting IPv6 exit must not be hidden by the winning address.
-			res.IPv6Conflicting = len(v6.Others) != 0
-			geoWG.Add(1)
-			go func() { defer geoWG.Done(); res.Country6 = r.geo.Country(ctx, v6.IP, httpTimeout) }()
-		} else if c.CheckIPv6 {
-			res.IPv6Unknown = possible || possibleErr != nil
-		}
-		geoWG.Wait()
-		if domains {
+		if len(plan.Apps) > 0 {
+			if plan.General {
+				general := res
+				general.Part = guard.GeneralMeasurement
+				send(general)
+			}
+			domainWG.Wait()
 			res.Domains = make(map[string][]guard.DomainResult, len(active))
 			for app, endpoints := range active {
 				for _, endpoint := range endpoints {
@@ -211,35 +253,46 @@ func (r *Runner) save(c *config.Config) error {
 	r.modMu.Lock()
 	defer r.modMu.Unlock()
 	err := config.Save(ConfigPath(), c)
+	if err != nil {
+		return err
+	}
 	if st, e := os.Stat(ConfigPath()); e == nil {
 		r.cfgMod = st.ModTime() // our own write is not an "edit" to reload
 	}
-	return err
+	return nil
+}
+
+func (r *Runner) readEditedConfig() (*config.Config, error) {
+	r.modMu.Lock()
+	defer r.modMu.Unlock()
+	st, err := os.Stat(ConfigPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if st.ModTime().Equal(r.cfgMod) {
+		return nil, nil
+	}
+	data, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		return nil, err
+	}
+	r.cfgMod = st.ModTime()
+	return config.Parse(data)
 }
 
 func (r *Runner) reloadIfEdited(now time.Time) {
-	r.modMu.Lock()
-	st, err := os.Stat(ConfigPath())
-	if err != nil || st.ModTime().Equal(r.cfgMod) {
-		r.modMu.Unlock()
-		return
-	}
-	r.cfgMod = st.ModTime()
-	r.modMu.Unlock()
-	data, err := os.ReadFile(ConfigPath())
-	if err != nil {
-		return
-	}
-	c, err := config.Parse(data)
+	changed, err := r.G.ReloadConfig(now, r.readEditedConfig)
 	if err != nil {
 		Logf("config.yaml: %v", err)
 		if r.OnConfigError != nil {
 			r.OnConfigError(err)
 		}
-		return
+	} else if changed {
+		Logf("config.yaml перечитан")
 	}
-	Logf("config.yaml перечитан")
-	r.G.SetConfig(now, c)
 }
 
 // Run blocks until ctx is cancelled, then un-freezes everything.
@@ -256,20 +309,34 @@ func (r *Runner) Run() {
 // time, retaining strict checks for genuinely future or expired measurements.
 func (r *Runner) run(ticks, configPolls <-chan time.Time, now func() time.Time) {
 	defer r.G.Shutdown()
-	r.G.Step(now())
+	lastActivity := now()
+	r.G.Step(lastActivity)
+	processedAt := func() time.Time {
+		current := now()
+		// Check every delivered event, not just ticks: a queued probe may be
+		// selected before the first post-sleep timer. Wall time covers Unix
+		// monotonic clocks that pause while the machine sleeps.
+		gap := current.Sub(lastActivity)
+		wall := current.Round(0).Sub(lastActivity.Round(0))
+		if gap > 3*time.Second || wall > 3*time.Second || wall < -3*time.Second {
+			r.G.Recheck(current, "source=event-loop kind=interruption; fresh verification required")
+		}
+		lastActivity = current
+		return current
+	}
 	var ignored uint64
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
 		case <-r.changes.C:
-			r.G.Step(now()) // never discard a relevant event due to a throttle
+			r.G.Step(processedAt()) // never discard a relevant event due to a throttle
 		case <-ticks:
-			r.G.Step(now())
+			r.G.Step(processedAt())
 		case res := <-r.results:
-			r.G.HandleProbe(now(), res)
+			r.G.HandleProbe(processedAt(), res)
 		case <-configPolls:
-			r.reloadIfEdited(now())
+			r.reloadIfEdited(processedAt())
 			if note := r.changes.RefreshFilter(); note != "" {
 				Logf("%s", note)
 			}
@@ -283,17 +350,21 @@ func (r *Runner) run(ticks, configPolls <-chan time.Time, now func() time.Time) 
 
 // State is what `zaslon status` reads from state.json.
 type State struct {
-	Updated   time.Time `json:"updated"`
-	Status    string    `json:"status"`
-	Line      string    `json:"line"`
-	IP        string    `json:"ip"`
-	Country   string    `json:"country"`
-	Allowed   bool      `json:"allowed"`
-	Apps      []string  `json:"running_apps"`
-	Frozen    int       `json:"frozen"`
-	PID       int       `json:"pid"`
-	Paused    bool      `json:"paused"`
-	ConfigLoc string    `json:"config"`
+	DomainCountry string    `json:"domain_country,omitempty"`
+	MeasuredAt    time.Time `json:"measured_at,omitempty"`
+	IP6           string    `json:"ipv6,omitempty"`
+	Country6      string    `json:"country6,omitempty"`
+	Updated       time.Time `json:"updated"`
+	Status        string    `json:"status"`
+	Line          string    `json:"line"`
+	IP            string    `json:"ip"`
+	Country       string    `json:"country"`
+	Allowed       bool      `json:"allowed"`
+	Apps          []string  `json:"running_apps"`
+	Frozen        int       `json:"frozen"`
+	PID           int       `json:"pid"`
+	Paused        bool      `json:"paused"`
+	ConfigLoc     string    `json:"config"`
 }
 
 func WriteState(s State) {

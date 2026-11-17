@@ -41,12 +41,17 @@ func (a Allow) Matches(ip, country string) bool {
 	return country != "" && slices.Contains(a.Countries, strings.ToUpper(country))
 }
 
-// AddIP adds an IPv4 address as is, and an IPv6 address as its /64 network:
-// IPv6 privacy extensions change the address within the /64 every day.
+// AddIP preserves the explicitly requested scope. An IPv6 address does not
+// silently grant its entire /64; a subnet must be entered with its prefix.
 func (a *Allow) AddIP(ip string) bool {
-	if addr, err := netip.ParseAddr(ip); err == nil && addr.Is6() {
-		p, _ := addr.Prefix(64)
+	p, err := ParseIPOrNet(ip)
+	if err != nil {
+		return false
+	}
+	if strings.Contains(ip, "/") {
 		ip = p.String()
+	} else {
+		ip = p.Addr().String()
 	}
 	if slices.Contains(a.IPs, ip) || a.coveredByIPs(ip) {
 		return false

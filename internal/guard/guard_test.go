@@ -45,7 +45,7 @@ var other = procs.Proc{PID: 200, Name: "Safari", Path: "/Applications/Safari.app
 func TestFreshProfileDoesNotSuspendAnyApp(t *testing.T) {
 	p := newFakeProcs(claude, other)
 	var revision uint64
-	g := New(config.Default(), Deps{Fingerprint: func() string { return "fixture-network" }, NetworkVersion: func() uint64 { return revision }, Procs: p, StartProbe: func(*config.Config, uint64, bool) func() { return nil }})
+	g := New(config.Default(), Deps{Fingerprint: func() string { return "fixture-network" }, NetworkVersion: func() uint64 { return revision }, Procs: p, StartProbe: func(*config.Config, uint64, ProbePlan) func() { return nil }})
 	now := time.Now()
 	g.Step(now)
 	revision++
@@ -72,12 +72,13 @@ type harness struct {
 func newHarness(t *testing.T, allow ...string) *harness {
 	h := &harness{t: t, p: newFakeProcs(claude, other), now: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), fp: "en0=192.168.0.10,utun6=172.19.0.1"}
 	cfg := config.Default()
+	cfg.CheckInterval = config.Duration(5 * time.Second)
 	cfg.Apps = []string{"claude"} // Explicit fixture selection; new profiles protect nothing.
 	cfg.Allow.IPs = allow
 	h.g = New(cfg, Deps{
 		Fingerprint:    func() string { return h.fp },
 		NetworkVersion: func() uint64 { return h.revision },
-		StartProbe: func(_ *config.Config, _ uint64, _ bool) func() {
+		StartProbe: func(_ *config.Config, _ uint64, _ ProbePlan) func() {
 			h.probes++
 			if h.onProbe != nil {
 				h.onProbe()
@@ -151,10 +152,14 @@ func TestVPNDropAndReturnWithinGrace(t *testing.T) {
 	if !h.p.frozen[claude.PID] {
 		t.Fatal("claude not frozen on network change")
 	}
+	if !h.had(EvFrozen) {
+		t.Fatal("no EvFrozen for the suspension on network change")
+	}
+	h.events = nil
 	h.probe("95.24.1.1", "RU")
 	h.want(Suspect)
-	if !h.had(EvFrozen) {
-		t.Fatal("no EvFrozen for a disallowed IP")
+	if h.had(EvFrozen) || !h.had(EvHoldReason) {
+		t.Fatal("the denied check changed the hold's reason, but did not suspend the process again")
 	}
 
 	// VPN back 10 s later: same IP, apps continue.
@@ -405,7 +410,7 @@ func TestIPv6Leak(t *testing.T) {
 	h.want(OK)
 }
 
-func TestExplicitAllowAddsIPv6Network(t *testing.T) {
+func TestAllowCurrentIPDoesNotAlsoAllowIPv6(t *testing.T) {
 	h := newHarness(t)
 	h.step(0)
 	h.probeFull(ProbeResult{IP: "64.137.54.87", Country: "NL", Votes: 2, IP6: "2a0e:1c80:1:2:aaaa:bbbb:cccc:dddd", Country6: "NL"})
@@ -414,11 +419,14 @@ func TestExplicitAllowAddsIPv6Network(t *testing.T) {
 		t.Fatal("explicit allow failed")
 	}
 	h.want(Suspect)
-	if got := h.saved.Allow.IPs; len(got) != 2 || got[1] != "2a0e:1c80:1:2::/64" {
+	if got := h.saved.Allow.IPs; len(got) != 1 || got[0] != "64.137.54.87" {
 		t.Fatalf("allowed = %v", got)
 	}
-	// A new privacy address in the same /64 is still allowed.
+	// IPv6 still needs an explicitly entered address or subnet.
 	h.step(time.Second)
+	h.probeFull(ProbeResult{IP: "64.137.54.87", Country: "NL", Votes: 2, IP6: "2a0e:1c80:1:2:1111:2222:3333:4444"})
+	h.want(Suspect)
+	h.g.Update(h.now, func(c *config.Config) { c.Allow.AddIP("2a0e:1c80:1:2::/64") })
 	h.probeFull(ProbeResult{IP: "64.137.54.87", Country: "NL", Votes: 2, IP6: "2a0e:1c80:1:2:1111:2222:3333:4444"})
 	h.want(OK)
 }
@@ -542,7 +550,7 @@ func TestCounters(t *testing.T) {
 	h.step(time.Second)
 	h.probe("64.137.54.87", "NL")
 	c := h.g.Snapshot(h.now).Counters
-	if c.Freezes != 1 || c.Saves != 1 || c.FrozenSeconds < 1.5 {
+	if c.Freezes != 2 || c.Saves != 1 || c.FrozenSeconds < 1.5 {
 		t.Fatalf("%+v", c)
 	}
 }

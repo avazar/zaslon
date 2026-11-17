@@ -1,11 +1,13 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" translate="no" class="notranslate">
 <head>
 <meta charset="utf-8">
+<meta name="google" content="notranslate">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zaslon</title>
 <link rel="icon" type="image/x-icon" href="favicon.ico">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="dark.css" id="dark-theme" media="(prefers-color-scheme: dark)">
 </head>
 <body>
 <div class="shell">
@@ -13,13 +15,25 @@
     <div class="brand"><img src="icon.png" alt=""><span>Zaslon</span></div>
     <nav id="nav"></nav>
     <div class="side-foot">
-      <a href="#" data-url="https://github.com/avazar/zaslon">GitHub</a>
+      <button type="button" data-url="https://github.com/avazar/zaslon">GitHub</button>
       <span id="ver"></span>
     </div>
   </aside>
   <main id="main"><div class="loading">…</div></main>
 </div>
 <div id="toast" class="toast" hidden></div>
+<div id="permissionConfirm" class="confirm-overlay" hidden>
+  <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="permissionTitle" aria-describedby="permissionDetail">
+    <h2 id="permissionTitle"></h2>
+    <p id="permissionDetail"></p>
+    <pre id="permissionValues"></pre>
+    <div class="row">
+      <button id="permissionCancel" class="btn"></button>
+      <button id="permissionAccept" class="btn primary"></button>
+    </div>
+  </section>
+</div>
+<script src="permissions.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

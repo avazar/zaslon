@@ -1,0 +1,20 @@
+:root {
+  --bg: #111318;
+  --side: #0c0e12;
+  --card: #191c22;
+  --line: #262a33;
+  --text: #e8eaee;
+  --muted: #8b93a1;
+  --soft: #20242c;
+  --accent: #5b8cff;
+  --ok: #34c46a;
+  --ok-bg: #15261c;
+  --warn: #f0a330;
+  --warn-bg: #2b2213;
+  --bad: #f05252;
+  --bad-bg: #2d1717;
+  --gray: #6b7280;
+  --gray-bg: #1f2228;
+  --shadow: none;
+  color-scheme: dark;
+}

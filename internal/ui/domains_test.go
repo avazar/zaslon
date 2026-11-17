@@ -146,3 +146,17 @@ func TestDomainReasonKeysAreDefined(t *testing.T) {
 		}
 	}
 }
+
+func TestDomainTimeoutNamesOnlyFailedEndpoint(t *testing.T) {
+	old:=Lang
+	defer func(){Lang=old}()
+	issue:=guard.DomainIssue{Endpoint:"https://api.anthropic.com/cdn-cgi/trace",Reason:guard.DomainUnconfirmed,Timeout:true}
+	group:=guard.GroupState{Status:guard.Suspect,Reason:issue.Reason,Issues:[]guard.DomainIssue{issue}}
+	for lang, want:=range map[string]string{"ru":"Тайм-аут проверки api.anthropic.com (IPv4)","en":"api.anthropic.com timed out (IPv4)"} {
+		Lang=lang
+		s:=guard.Snapshot{Status:guard.Suspect,Reason:issue.Reason,Groups:[]guard.GroupState{group,group}}
+		if got:=StatusLine(s); got!=want {t.Fatalf("status: %q",got)}
+		_,body,_:=Notification(guard.Event{Kind:guard.EvFrozen,Reason:issue.Reason,Issues:group.Issues,Notify:true})
+		if body!=want {t.Fatalf("notification: %q",body)}
+	}
+}

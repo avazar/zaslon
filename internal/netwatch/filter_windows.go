@@ -53,7 +53,7 @@ type windowsEventFilter struct {
 	ready        bool
 	touched      map[uint64]bool
 	local        map[uint64]uint32 // LUID -> index; never identify a tunnel by its name or index alone
-	blocked      map[uint64]bool   // external/unknown activity must never be relearned as local-only
+	seenTeredo   map[uint64]bool   // previously proved interfaces can request a fresh snapshot
 	disabled     bool
 	refreshing   bool
 	needsRefresh atomic.Bool
@@ -62,33 +62,34 @@ type windowsEventFilter struct {
 func (f *windowsEventFilter) initialize(candidates map[uint64]uint32, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err == nil {
-		if f.local == nil {
-			f.local = make(map[uint64]uint32)
+	local := make(map[uint64]uint32)
+	if err == nil && !f.disabled {
+		if f.seenTeredo == nil {
+			f.seenTeredo = make(map[uint64]bool)
 		}
 		for luid, index := range candidates {
-			if !f.disabled && !f.blocked[luid] && !f.touched[luid] && !f.touched[0] {
-				f.local[luid] = index
-			} else if !f.disabled && !f.blocked[luid] {
+			if !f.touched[luid] {
+				local[luid] = index
+				f.seenTeredo[luid] = true
+			} else {
 				f.needsRefresh.Store(true)
 			}
 		}
-	} else {
-		clear(f.local)
 	}
+	f.local = local
 	f.ready = true
 	f.refreshing = false
 	f.touched = nil
 }
 
 func (f *windowsEventFilter) beginRefresh() bool {
-	if !f.needsRefresh.Swap(false) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.disabled || f.refreshing || !f.needsRefresh.Swap(false) {
 		return false
 	}
-	f.mu.Lock()
 	f.refreshing = true
 	f.touched = map[uint64]bool{}
-	f.mu.Unlock()
 	return true
 }
 
@@ -97,12 +98,6 @@ func (f *windowsEventFilter) count() int { f.mu.Lock(); defer f.mu.Unlock(); ret
 func (f *windowsEventFilter) ignore(h windowsChangeHint) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.ready || f.refreshing {
-		if f.touched == nil {
-			f.touched = map[uint64]bool{}
-		}
-		f.touched[h.luid] = true
-	}
 	if h.luid == 0 {
 		// An unidentifiable notification may have changed any candidate.
 		clear(f.local)
@@ -124,22 +119,21 @@ func (f *windowsEventFilter) ignore(h windowsChangeHint) bool {
 			localOnly = localIPv6Route(h.prefix, h.nextHop)
 		}
 	}
-	if localOnly && (!known || h.index == index) {
-		if known && f.ready {
-			return true
-		}
-		if f.ready && !f.blocked[h.luid] && h.source == "NotifyIpInterfaceChange" {
-			f.needsRefresh.Store(true)
-		}
-		return false
+	if localOnly && known && h.index == index && f.ready {
+		return true
 	}
-	// Once external/unknown activity is seen, all later interface and local
-	// notifications remain relevant for this watcher lifetime, even after delete.
+	if !f.ready || f.refreshing {
+		if f.touched == nil {
+			f.touched = map[uint64]bool{}
+		}
+		f.touched[h.luid] = true
+	}
+	// An external/unknown event takes effect immediately. Later local events
+	// remain relevant until a fresh snapshot confirms the tunnel is local-only.
 	delete(f.local, h.luid)
-	if f.blocked == nil {
-		f.blocked = map[uint64]bool{}
+	if f.ready && (f.seenTeredo[h.luid] || localOnly && h.source == "NotifyIpInterfaceChange") {
+		f.needsRefresh.Store(true)
 	}
-	f.blocked[h.luid] = true
 	return false
 }
 
@@ -159,12 +153,12 @@ func localTeredoInterfaces() (map[uint64]uint32, error) {
 		return nil, err
 	}
 	var addresses *windows.MibUnicastIpAddressTable
-	if err := windows.GetUnicastIpAddressTable(windows.AF_INET6, &addresses); err != nil {
+	if err := windows.GetUnicastIpAddressTable(windows.AF_UNSPEC, &addresses); err != nil {
 		return nil, fmt.Errorf("address snapshot: %w", err)
 	}
 	defer windows.FreeMibTable(unsafe.Pointer(addresses))
 	var routes *windows.MibIpForwardTable2
-	if err := windows.GetIpForwardTable2(windows.AF_INET6, &routes); err != nil {
+	if err := windows.GetIpForwardTable2(windows.AF_UNSPEC, &routes); err != nil {
 		return nil, fmt.Errorf("route snapshot: %w", err)
 	}
 	defer windows.FreeMibTable(unsafe.Pointer(routes))
@@ -205,14 +199,14 @@ func candidateTeredoInterfaces(interfaces []windows.MibIfRow2, addresses []windo
 		}
 	}
 	for _, r := range addresses {
-		if r.Address.Family != windows.AF_INET6 || !netip.AddrFrom16(r.Address.Addr).IsLinkLocalUnicast() {
+		if r.InterfaceIndex != local[r.InterfaceLuid] || r.Address.Family != windows.AF_INET6 || !netip.AddrFrom16(r.Address.Addr).IsLinkLocalUnicast() {
 			delete(local, r.InterfaceLuid)
 		}
 	}
 	for _, r := range routes {
 		dest := *(*changeSockaddr)(unsafe.Pointer(&r.DestinationPrefix.Prefix))
 		next := *(*changeSockaddr)(unsafe.Pointer(&r.NextHop))
-		if !localIPv6Route(netip.PrefixFrom(changeIP(dest), int(r.DestinationPrefix.PrefixLength)), changeIP(next)) {
+		if r.InterfaceIndex != local[r.InterfaceLuid] || !localIPv6Route(netip.PrefixFrom(changeIP(dest), int(r.DestinationPrefix.PrefixLength)), changeIP(next)) {
 			delete(local, r.InterfaceLuid)
 		}
 	}

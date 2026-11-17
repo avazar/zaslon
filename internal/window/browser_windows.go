@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/avazar/zaslon/internal/procs"
 	"golang.org/x/sys/windows"
 )
 
@@ -158,7 +159,16 @@ func openBrowserPanel(ctx context.Context, focus <-chan struct{}, browser, url, 
 		return err
 	}
 	defer removePrivateProfile(base, profile)
-	job, err := windows.CreateJobObject(nil, nil)
+	// Disable account sign-in before Edge opens this disposable profile.
+	defaultDir := filepath.Join(profile, "Default")
+	if err := os.Mkdir(defaultDir, 0700); err != nil {
+		return err
+	}
+	const prefs = `{"signin":{"allowed":false,"allowed_on_next_startup":false},"translate":{"enabled":false}}`
+	if err := os.WriteFile(filepath.Join(defaultDir, "Preferences"), []byte(prefs), 0600); err != nil {
+		return err
+	}
+	job, err := procs.NewPanelJob()
 	if err != nil {
 		return err
 	}
@@ -168,7 +178,11 @@ func openBrowserPanel(ctx context.Context, focus <-chan struct{}, browser, url, 
 	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		return err
 	}
-	process, err := startPanelBrowser(job, browser, []string{"--app=" + url, fmt.Sprintf("--window-size=%d,%d", Width, Height), "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "--disable-background-mode", "--disable-features=Translate"})
+	process, err := startPanelBrowser(job, browser, []string{
+		"--app=" + url, fmt.Sprintf("--window-size=%d,%d", Width, Height), "--user-data-dir=" + profile,
+		"--disable-sync", "--no-first-run", "--no-default-browser-check",
+		"--disable-background-mode", "--disable-features=Translate,msImplicitSignin",
+	})
 	if err != nil {
 		return err
 	}

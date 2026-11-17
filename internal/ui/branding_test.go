@@ -3,12 +3,32 @@ package ui
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/xml"
 	"image"
 	"image/png"
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/avazar/zaslon/internal/procs"
 )
+
+func TestPanelHasLogoForEveryPreset(t *testing.T) {
+	for _, preset := range procs.Presets {
+		data, err := panelFiles.ReadFile("panel/icons/apps/" + preset.ID + ".svg")
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		var svg struct {
+			XMLName xml.Name `xml:"http://www.w3.org/2000/svg svg"`
+			ViewBox string   `xml:"viewBox,attr"`
+		}
+		if err := xml.Unmarshal(data, &svg); err != nil || svg.ViewBox == "" {
+			t.Errorf("%s: invalid SVG or missing viewBox: %v", preset.ID, err)
+		}
+	}
+}
 
 // A dot has no white strokes outside its central circle; the snowflake does.
 // Check the visible result, including logical size on high-DPI displays.

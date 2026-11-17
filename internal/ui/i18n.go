@@ -3,7 +3,9 @@ package ui
 
 import (
 	"fmt"
+	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,13 +20,20 @@ var Lang = "ru"
 
 var msgs = map[string]map[string]string{
 	"ru": {
-		"checks.ignored":        "Приложения работают: недоступные проверки игнорируются",
-		"reason.v6conflict":     "Сервисы IPv6 сообщили разные адреса",
-		"ev.resumed.ignored":    "Возобновлено по настройке игнорирования недоступной проверки: %s",
-		"ev.resumed.ignored.b":  "Недоступная проверка проигнорирована по настройке. Разрешённый выход не подтверждён для всех проверок.",
-		"frozen.v6unknown":      "IPv6 не удалось проверить: приложения приостановлены",
-		"reason.v6unknown":      "IPv6 не подтверждён",
-		"reason.domain_unknown": "Выход к сервису не подтверждён",
+		"checks.ignored":          "Приложения работают: недоступные проверки игнорируются",
+		"reason.v6conflict":       "Сервисы IPv6 сообщили разные адреса",
+		"ev.resumed.ignored":      "Возобновлено по настройке игнорирования недоступной проверки: %s",
+		"ev.resumed.ignored.b":    "Недоступная проверка проигнорирована по настройке. Разрешённый выход не подтверждён для всех проверок.",
+		"frozen.v6unknown":        "IPv6 не удалось проверить: приложения приостановлены",
+		"reason.v6unknown":        "IPv6 не подтверждён",
+		"domain.timeout":          "Тайм-аут проверки %s (%s)",
+		"domain.unconfirmed":      "Не удалось проверить %s (%s)",
+		"reason.domain_unknown":   "Не удалось проверить внешний IP приложения",
+		"country.domain_source":   "По доменным проверкам",
+		"reason.settings":         "Изменены правила защиты",
+		"reason.country_unknown":  "Страна выхода IPv4 не определена",
+		"reason.country6_unknown": "Страна выхода IPv6 не определена",
+
 		"ev.resumed.domain.b":   "Выход к %s проверен: %s. Приостановка снята.",
 		"reason.domain_ip":      "IP на домене сервиса не разрешён",
 		"reason.parent_policy":  "Процесс удерживается правилами другого приложения или родителя",
@@ -89,78 +98,88 @@ var msgs = map[string]map[string]string{
 		"sec":                   "%d с",
 		"min":                   "%d мин",
 
-		"ev.autoallowed":    "Разрешён текущий IP %s",
-		"ev.autoallowed.t":  "Zaslon запущен",
-		"ev.autoallowed.b":  "Разрешён текущий IP: %s. Если VPN меняет адреса, разрешите всю страну в меню.",
-		"ev.netchanged":     "Сеть изменилась",
-		"ev.domaincheck":    "Проверка доменов: %s",
-		"ev.ipchanged":      "Новый IP: %s",
-		"ev.offline":        "Пропал интернет",
-		"ev.online":         "Интернет вернулся: %s",
-		"ev.frozen":         "Заморожено (%s): %s",
-		"ev.frozen.t":       "%s: заморожено",
-		"ev.frozen.ip.b":    "IP %s не разрешён. Приложения останутся на паузе до успешной проверки.",
-		"ev.frozen.off.b":   "Пропал интернет. Приложения останутся на паузе до успешной проверки.",
-		"ev.resumed":        "Разморожено: %s",
-		"ev.resumed.t":      "%s: снова работает",
-		"ev.resumed.b":      "IP %s разрешён.",
-		"ev.blocked":        "Закрыто: %s",
-		"ev.blocked.t":      "%s: закрыто",
-		"ev.blocked.ip.b":   "IP %s не разрешён. Открыть можно, когда вернётся разрешённый IP.",
-		"ev.blocked.off.b":  "Нет интернета. Открыть можно, когда он вернётся с разрешённым IP.",
-		"ev.killednew":      "Не дал запуститься: %s",
-		"ev.killednew.t":    "%s не запустится",
-		"ev.killednew.b":    "Сейчас IP %s не разрешён.",
-		"ev.unblocked":      "IP снова разрешён: %s",
-		"ev.unblocked.t":    "Можно работать",
-		"ev.unblocked.b":    "IP %s разрешён, приложения можно открывать.",
-		"ev.paused":         "Пауза: %s",
-		"ev.unpaused":       "Пауза закончилась",
-		"ev.allowedip":      "Разрешён IP %s",
-		"ev.allowedcountry": "Разрешена страна: %s",
-		"reason.ip":         "IP не разрешён",
-		"reason.offline":    "IP не удалось определить",
-		"reason.net":        "сеть изменилась",
-		"cfg.error.t":       "Ошибка в настройках",
-		"cfg.error.b":       "%v. Работаю со старыми настройками.",
-		"panel":             "Открыть панель Zaslon…",
-		"panel.close":       "Закрыть окно",
-		"panel.quit":        "Закрыть панель",
-		"trust":             "Доверять этой сети (без проверки IP)",
-		"trusted.on":        "Доверенная сеть: %s",
-		"dns.leak":          "⚠ DNS идёт мимо VPN: %s",
-		"report":            "Сообщить о проблеме…",
-		"frozen.dns":        "DNS мимо VPN: приложения приостановлены",
-		"blocked.dns":       "Заблокировано: DNS идёт мимо VPN",
-		"reason.dns":        "DNS мимо VPN",
-		"ev.dnsleak":        "DNS идёт мимо VPN: %s",
-		"ev.dnsleak.t":      "DNS идёт мимо VPN",
-		"ev.dnsleak.b":      "Запросы к сайтам уходят через %s, а не через VPN. Сайты, которые вы открываете, видны провайдеру. Включите DNS в настройках VPN.",
-		"ev.trusted":        "Доверенная сеть: %s",
-		"ev.frozen.dns.b":   "IP через VPN, но DNS идёт через %s. Приложения останутся на паузе до успешной проверки.",
-		"ev.blocked.dns.b":  "DNS идёт через %s мимо VPN. Включите DNS в настройках VPN.",
-		"panel.err.custom":  "Нужны название и хотя бы одно правило поиска",
-		"panel.err.trust":   "Не удалось узнать эту сеть: Zaslon не видит роутер (например, при подключении только через VPN)",
-		"panel.err.country": "Нужен двухбуквенный код страны",
-		"update.available":  "Обновить до %s",
-		"update.installing": "Устанавливаю %s…",
-		"update.t":          "Вышел Zaslon %s",
-		"update.b":          "Обновить можно в меню Zaslon, пункт «Обновить до %s». Настройки сохранятся.",
-		"update.failed.t":   "Обновление не установилось",
-		"update.failed.b":   "%v. Открываю страницу релиза.",
-		"crash.t":           "Zaslon остановился",
-		"crash.b":           "Он упал несколько раз подряд. Подробности в журнале: %s. Запустите Zaslon заново и напишите нам в GitHub Issues.",
-		"already.t":         "Zaslon уже запущен",
-		"already.b":         "Значок в строке меню (на Windows - у часов, может прятаться под стрелкой ^).",
+		"ev.autoallowed":     "Разрешён текущий IP %s",
+		"ev.autoallowed.t":   "Zaslon запущен",
+		"ev.autoallowed.b":   "Разрешён текущий IP: %s. Если VPN меняет адреса, разрешите всю страну в меню.",
+		"ev.netchanged":      "Сеть изменилась",
+		"ev.domaincheck":     "Проверка доменов: %s",
+		"ev.ipchanged":       "Новый IP: %s",
+		"ev.offline":         "Пропал интернет",
+		"ev.online":          "Интернет вернулся: %s",
+		"ev.frozen":          "Заморожено (%s): %s",
+		"ev.held":            "Остаются на паузе (%s): %s",
+		"ev.frozen.t":        "%s: заморожено",
+		"ev.frozen.ip.b":     "IP %s не разрешён. Приложения останутся на паузе до успешной проверки.",
+		"ev.frozen.off.b":    "Пропал интернет. Приложения останутся на паузе до успешной проверки.",
+		"ev.resumed":         "Разморожено: %s",
+		"ev.resumed.t":       "%s: снова работает",
+		"ev.resumed.b":       "IP %s разрешён.",
+		"ev.blocked":         "Закрыто: %s",
+		"ev.blocked.t":       "%s: закрыто",
+		"ev.blocked.ip.b":    "IP %s не разрешён. Открыть можно, когда вернётся разрешённый IP.",
+		"ev.blocked.off.b":   "Нет интернета. Открыть можно, когда он вернётся с разрешённым IP.",
+		"ev.killednew":       "Не дал запуститься: %s",
+		"ev.killednew.t":     "%s не запустится",
+		"ev.killednew.b":     "Сейчас IP %s не разрешён.",
+		"ev.unblocked":       "IP снова разрешён: %s",
+		"ev.unblocked.t":     "Можно работать",
+		"ev.unblocked.b":     "IP %s разрешён, приложения можно открывать.",
+		"ev.paused":          "Пауза: %s",
+		"ev.unpaused":        "Пауза закончилась",
+		"ev.allowedip":       "Разрешён IP %s",
+		"ev.allowedcountry":  "Разрешена страна: %s",
+		"reason.ip":          "IP не разрешён",
+		"reason.offline":     "IP не удалось определить",
+		"reason.net":         "сеть изменилась",
+		"reason.pending":     "ожидание первой проверки",
+		"reason.app_pending": "ожидание проверки после включения защиты",
+		"cfg.error.t":        "Ошибка в настройках",
+		"cfg.error.b":        "%v. Работаю со старыми настройками.",
+		"panel":              "Открыть панель Zaslon…",
+		"panel.close":        "Закрыть окно",
+		"panel.quit":         "Закрыть панель",
+		"trust":              "Доверять этой сети (без проверки IP)",
+		"trusted.on":         "Доверенная сеть: %s",
+		"dns.leak":           "⚠ DNS идёт мимо VPN: %s",
+		"report":             "Сообщить о проблеме…",
+		"frozen.dns":         "DNS мимо VPN: приложения приостановлены",
+		"blocked.dns":        "Заблокировано: DNS идёт мимо VPN",
+		"reason.dns":         "DNS мимо VPN",
+		"ev.dnsleak":         "DNS идёт мимо VPN: %s",
+		"ev.dnsleak.t":       "DNS идёт мимо VPN",
+		"ev.dnsleak.b":       "Запросы к сайтам уходят через %s, а не через VPN. Сайты, которые вы открываете, видны провайдеру. Включите DNS в настройках VPN.",
+		"ev.trusted":         "Доверенная сеть: %s",
+		"ev.frozen.dns.b":    "IP через VPN, но DNS идёт через %s. Приложения останутся на паузе до успешной проверки.",
+		"ev.blocked.dns.b":   "DNS идёт через %s мимо VPN. Включите DNS в настройках VPN.",
+		"panel.err.custom":   "Нужны название и хотя бы одно правило поиска",
+		"panel.err.trust":    "Не удалось узнать эту сеть: Zaslon не видит роутер (например, при подключении только через VPN)",
+		"panel.err.country":  "Нужен двухбуквенный код страны",
+		"update.available":   "Обновить до %s",
+		"update.installing":  "Устанавливаю %s…",
+		"update.t":           "Вышел Zaslon %s",
+		"update.b":           "Обновить можно в меню Zaslon, пункт «Обновить до %s». Настройки сохранятся.",
+		"update.failed.t":    "Обновление не установилось",
+		"update.failed.b":    "%v. Открываю страницу релиза.",
+		"crash.t":            "Zaslon остановился",
+		"crash.b":            "Он упал несколько раз подряд. Подробности в журнале: %s. Запустите Zaslon заново и напишите нам в GitHub Issues.",
+		"already.t":          "Zaslon уже запущен",
+		"already.b":          "Значок в строке меню (на Windows - у часов, может прятаться под стрелкой ^).",
 	},
 	"en": {
-		"checks.ignored":        "Apps running: unavailable checks are ignored",
-		"reason.v6conflict":     "IPv6 services returned conflicting addresses",
-		"ev.resumed.ignored":    "Resumed by the unavailable-check policy: %s",
-		"ev.resumed.ignored.b":  "An unavailable check was ignored by your setting. The allowed exit is not confirmed for all checks.",
-		"frozen.v6unknown":      "IPv6 check inconclusive: apps suspended",
-		"reason.v6unknown":      "IPv6 not confirmed",
-		"reason.domain_unknown": "Service exit not confirmed",
+		"checks.ignored":          "Apps running: unavailable checks are ignored",
+		"reason.v6conflict":       "IPv6 services returned conflicting addresses",
+		"ev.resumed.ignored":      "Resumed by the unavailable-check policy: %s",
+		"ev.resumed.ignored.b":    "An unavailable check was ignored by your setting. The allowed exit is not confirmed for all checks.",
+		"frozen.v6unknown":        "IPv6 check inconclusive: apps suspended",
+		"reason.v6unknown":        "IPv6 not confirmed",
+		"domain.timeout":          "%s timed out (%s)",
+		"domain.unconfirmed":      "Could not verify %s (%s)",
+		"reason.domain_unknown":   "App’s public IP could not be verified",
+		"country.domain_source":   "From service checks",
+		"reason.settings":         "Protection settings changed",
+		"reason.country_unknown":  "IPv4 exit country unknown",
+		"reason.country6_unknown": "IPv6 exit country unknown",
+
 		"ev.resumed.domain.b":   "Exit to %s verified: %s. Suspension released.",
 		"reason.domain_ip":      "IP seen by a service is not allowed",
 		"reason.parent_policy":  "Another matching app or parent policy holds this process",
@@ -225,69 +244,72 @@ var msgs = map[string]map[string]string{
 		"sec":                   "%ds",
 		"min":                   "%d min",
 
-		"ev.autoallowed":    "Allowed the current IP %s",
-		"ev.autoallowed.t":  "Zaslon is running",
-		"ev.autoallowed.b":  "Allowed the current IP: %s. If your VPN rotates addresses, allow the whole country in the menu.",
-		"ev.netchanged":     "Network changed",
-		"ev.domaincheck":    "Service check: %s",
-		"ev.ipchanged":      "New IP: %s",
-		"ev.offline":        "Internet is gone",
-		"ev.online":         "Internet is back: %s",
-		"ev.frozen":         "Frozen (%s): %s",
-		"ev.frozen.t":       "%s: frozen",
-		"ev.frozen.ip.b":    "IP %s is not allowed. Apps stay suspended until a successful check.",
-		"ev.frozen.off.b":   "No internet. Apps stay suspended until a successful check.",
-		"ev.resumed":        "Resumed: %s",
-		"ev.resumed.t":      "%s: running again",
-		"ev.resumed.b":      "IP %s is allowed.",
-		"ev.blocked":        "Closed: %s",
-		"ev.blocked.t":      "%s: closed",
-		"ev.blocked.ip.b":   "IP %s is not allowed. You can reopen it once an allowed IP is back.",
-		"ev.blocked.off.b":  "No internet. You can reopen it once it's back with an allowed IP.",
-		"ev.killednew":      "Didn't let start: %s",
-		"ev.killednew.t":    "%s won't start",
-		"ev.killednew.b":    "IP %s is not allowed right now.",
-		"ev.unblocked":      "IP allowed again: %s",
-		"ev.unblocked.t":    "Good to go",
-		"ev.unblocked.b":    "IP %s is allowed, you can open your apps.",
-		"ev.paused":         "Paused: %s",
-		"ev.unpaused":       "Pause is over",
-		"ev.allowedip":      "Allowed IP %s",
-		"ev.allowedcountry": "Allowed country: %s",
-		"reason.ip":         "IP not allowed",
-		"reason.offline":    "IP check unavailable",
-		"reason.net":        "network changed",
-		"cfg.error.t":       "Settings error",
-		"cfg.error.b":       "%v. Keeping the previous settings.",
-		"panel":             "Open Zaslon panel…",
-		"panel.close":       "Close Window",
-		"panel.quit":        "Quit Panel",
-		"trust":             "Trust this network (no IP check)",
-		"trusted.on":        "Trusted network: %s",
-		"dns.leak":          "⚠ DNS bypasses the VPN: %s",
-		"report":            "Report a problem…",
-		"frozen.dns":        "DNS bypasses the VPN: apps suspended",
-		"blocked.dns":       "Blocked: DNS bypasses the VPN",
-		"reason.dns":        "DNS bypasses the VPN",
-		"ev.dnsleak":        "DNS bypasses the VPN: %s",
-		"ev.dnsleak.t":      "DNS bypasses the VPN",
-		"ev.dnsleak.b":      "Lookups go through %s instead of the VPN, so your ISP sees which sites you open. Turn on DNS in your VPN settings.",
-		"ev.trusted":        "Trusted network: %s",
-		"ev.frozen.dns.b":   "The IP goes through the VPN, but DNS goes through %s. Apps stay suspended until a successful check.",
-		"ev.blocked.dns.b":  "DNS goes through %s, around the VPN. Turn on DNS in your VPN settings.",
-		"panel.err.custom":  "A name and at least one match rule are needed",
-		"panel.err.trust":   "Can't identify this network: Zaslon doesn't see the router (e.g. when connected through a VPN only)",
-		"panel.err.country": "A two-letter country code is needed",
-		"update.available":  "Update to %s",
-		"update.installing": "Installing %s…",
-		"update.t":          "Zaslon %s is out",
-		"update.b":          "Update from the Zaslon menu: \"Update to %s\". Your settings stay.",
-		"update.failed.t":   "Update failed",
-		"update.failed.b":   "%v. Opening the release page.",
-		"crash.t":           "Zaslon stopped",
-		"crash.b":           "It crashed several times in a row. Details in the log: %s. Start Zaslon again and please report it on GitHub Issues.",
-		"already.t":         "Zaslon is already running",
-		"already.b":         "Look for the icon in the menu bar (on Windows - by the clock, maybe under the ^ arrow).",
+		"ev.autoallowed":     "Allowed the current IP %s",
+		"ev.autoallowed.t":   "Zaslon is running",
+		"ev.autoallowed.b":   "Allowed the current IP: %s. If your VPN rotates addresses, allow the whole country in the menu.",
+		"ev.netchanged":      "Network changed",
+		"ev.domaincheck":     "Service check: %s",
+		"ev.ipchanged":       "New IP: %s",
+		"ev.offline":         "Internet is gone",
+		"ev.online":          "Internet is back: %s",
+		"ev.frozen":          "Frozen (%s): %s",
+		"ev.held":            "Still suspended (%s): %s",
+		"ev.frozen.t":        "%s: frozen",
+		"ev.frozen.ip.b":     "IP %s is not allowed. Apps stay suspended until a successful check.",
+		"ev.frozen.off.b":    "No internet. Apps stay suspended until a successful check.",
+		"ev.resumed":         "Resumed: %s",
+		"ev.resumed.t":       "%s: running again",
+		"ev.resumed.b":       "IP %s is allowed.",
+		"ev.blocked":         "Closed: %s",
+		"ev.blocked.t":       "%s: closed",
+		"ev.blocked.ip.b":    "IP %s is not allowed. You can reopen it once an allowed IP is back.",
+		"ev.blocked.off.b":   "No internet. You can reopen it once it's back with an allowed IP.",
+		"ev.killednew":       "Didn't let start: %s",
+		"ev.killednew.t":     "%s won't start",
+		"ev.killednew.b":     "IP %s is not allowed right now.",
+		"ev.unblocked":       "IP allowed again: %s",
+		"ev.unblocked.t":     "Good to go",
+		"ev.unblocked.b":     "IP %s is allowed, you can open your apps.",
+		"ev.paused":          "Paused: %s",
+		"ev.unpaused":        "Pause is over",
+		"ev.allowedip":       "Allowed IP %s",
+		"ev.allowedcountry":  "Allowed country: %s",
+		"reason.ip":          "IP not allowed",
+		"reason.offline":     "IP check unavailable",
+		"reason.net":         "network changed",
+		"reason.pending":     "waiting for the first check",
+		"reason.app_pending": "waiting for a check after enabling protection",
+		"cfg.error.t":        "Settings error",
+		"cfg.error.b":        "%v. Keeping the previous settings.",
+		"panel":              "Open Zaslon panel…",
+		"panel.close":        "Close Window",
+		"panel.quit":         "Quit Panel",
+		"trust":              "Trust this network (no IP check)",
+		"trusted.on":         "Trusted network: %s",
+		"dns.leak":           "⚠ DNS bypasses the VPN: %s",
+		"report":             "Report a problem…",
+		"frozen.dns":         "DNS bypasses the VPN: apps suspended",
+		"blocked.dns":        "Blocked: DNS bypasses the VPN",
+		"reason.dns":         "DNS bypasses the VPN",
+		"ev.dnsleak":         "DNS bypasses the VPN: %s",
+		"ev.dnsleak.t":       "DNS bypasses the VPN",
+		"ev.dnsleak.b":       "Lookups go through %s instead of the VPN, so your ISP sees which sites you open. Turn on DNS in your VPN settings.",
+		"ev.trusted":         "Trusted network: %s",
+		"ev.frozen.dns.b":    "The IP goes through the VPN, but DNS goes through %s. Apps stay suspended until a successful check.",
+		"ev.blocked.dns.b":   "DNS goes through %s, around the VPN. Turn on DNS in your VPN settings.",
+		"panel.err.custom":   "A name and at least one match rule are needed",
+		"panel.err.trust":    "Can't identify this network: Zaslon doesn't see the router (e.g. when connected through a VPN only)",
+		"panel.err.country":  "A two-letter country code is needed",
+		"update.available":   "Update to %s",
+		"update.installing":  "Installing %s…",
+		"update.t":           "Zaslon %s is out",
+		"update.b":           "Update from the Zaslon menu: \"Update to %s\". Your settings stay.",
+		"update.failed.t":    "Update failed",
+		"update.failed.b":    "%v. Opening the release page.",
+		"crash.t":            "Zaslon stopped",
+		"crash.b":            "It crashed several times in a row. Details in the log: %s. Start Zaslon again and please report it on GitHub Issues.",
+		"already.t":          "Zaslon is already running",
+		"already.b":          "Look for the icon in the menu bar (on Windows - by the clock, maybe under the ^ arrow).",
 	},
 }
 
@@ -361,6 +383,35 @@ func appsText(apps []string) string {
 	return strings.Join(apps, ", ")
 }
 
+func domainIssueText(issue guard.DomainIssue) string {
+	host := issue.Endpoint
+	if u, err := url.Parse(host); err == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	family := "IPv4"
+	if issue.Reason == guard.IPv6Unconfirmed {
+		family = "IPv6"
+	}
+	if issue.Timeout {
+		return T("domain.timeout", host, family)
+	}
+	if issue.Reason == guard.DomainUnconfirmed || issue.Reason == guard.IPv6Unconfirmed {
+		return T("domain.unconfirmed", host, family)
+	}
+	return host + " — " + reasonText(issue.Reason)
+}
+
+func domainIssueList(issues []guard.DomainIssue) string {
+	var lines []string
+	for _, issue := range issues {
+		line := domainIssueText(issue)
+		if !slices.Contains(lines, line) {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, " · ")
+}
+
 // StatusLine is the first line of the menu.
 func StatusLine(s guard.Snapshot) string {
 	if len(s.Errors) != 0 {
@@ -381,10 +432,19 @@ func StatusLine(s guard.Snapshot) string {
 		}
 		return T("ok")
 	case guard.Suspect:
+		var issues []guard.DomainIssue
+		for _, gr := range s.Groups {
+			if gr.Status == s.Status && gr.Reason == s.Reason {
+				issues = append(issues, gr.Issues...)
+			}
+		}
+		if len(issues) > 0 {
+			return domainIssueList(issues)
+		}
 		switch s.Reason {
 		case guard.IPv6Conflict:
 			return reasonText(s.Reason)
-		case guard.ProcessPolicyDenied:
+		case guard.ProcessPolicyDenied, guard.AppCheckPending, guard.SettingsChanged, guard.CountryUnknown, guard.IPv6CountryUnknown:
 			return reasonText(s.Reason)
 		case guard.DomainUnconfirmed, guard.DomainIPNotAllowed:
 			return reasonText(s.Reason)
@@ -420,6 +480,16 @@ func StatusLine(s guard.Snapshot) string {
 
 func reasonText(r guard.Reason) string {
 	switch r {
+	case guard.NoReason:
+		return T("reason.pending")
+	case guard.SettingsChanged:
+		return T("reason.settings")
+	case guard.CountryUnknown:
+		return T("reason.country_unknown")
+	case guard.IPv6CountryUnknown:
+		return T("reason.country6_unknown")
+	case guard.AppCheckPending:
+		return T("reason.app_pending")
 	case guard.IPv6Conflict:
 		return T("reason.v6conflict")
 	case guard.ProcessPolicyDenied:
@@ -465,6 +535,8 @@ func EventLine(e guard.Event) string {
 		s = T("ev.online", ipc)
 	case guard.EvFrozen:
 		s = T("ev.frozen", reasonText(e.Reason), appsText(e.Apps))
+	case guard.EvHoldReason:
+		s = T("ev.held", reasonText(e.Reason), appsText(e.Apps))
 	case guard.EvResumed:
 		if e.IgnoredChecks {
 			s = T("ev.resumed.ignored", appsText(e.Apps))
@@ -513,11 +585,14 @@ func Notification(e guard.Event) (title, body string, ok bool) {
 	switch e.Kind {
 	case guard.EvAutoAllowed:
 		return T("ev.autoallowed.t"), T("ev.autoallowed.b", ipc), true
-	case guard.EvFrozen:
+	case guard.EvFrozen, guard.EvHoldReason:
+		if len(e.Issues) > 0 {
+			return T("ev.frozen.t", apps), domainIssueList(e.Issues), true
+		}
 		switch e.Reason {
 		case guard.IPv6Conflict:
 			return T("ev.frozen.t", apps), reasonText(e.Reason), true
-		case guard.ProcessPolicyDenied:
+		case guard.ProcessPolicyDenied, guard.AppCheckPending, guard.SettingsChanged, guard.CountryUnknown, guard.IPv6CountryUnknown:
 			return T("ev.frozen.t", apps), reasonText(e.Reason), true
 		case guard.DomainUnconfirmed, guard.DomainIPNotAllowed:
 			return T("ev.frozen.t", apps), reasonText(e.Reason), true

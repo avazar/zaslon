@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -65,7 +66,8 @@ type Config struct {
 	DomainChecksEnabled map[string]bool     `yaml:"domain_checks_enabled"`
 	TrustedNetworks     []TrustedNetwork    `yaml:"trusted_networks"`
 
-	CheckInterval Duration `yaml:"check_interval"`
+	DomainCheckInterval Duration `yaml:"domain_check_interval"`
+	CheckInterval       Duration `yaml:"check_interval"`
 
 	IPServices            []string      `yaml:"ip_services"`
 	MinAgree              int           `yaml:"min_agree"`
@@ -76,6 +78,7 @@ type Config struct {
 	IPv6Services          []string      `yaml:"ipv6_services"`
 	MenuBar               string        `yaml:"menubar"`
 	UpdateCheck           bool          `yaml:"update_check"`
+	Theme                 string        `yaml:"theme"`
 	Language              string        `yaml:"language"`
 	Notifications         bool          `yaml:"notifications"`
 }
@@ -99,7 +102,8 @@ func Default() *Config {
 		DomainChecks:          defaultDomainLists(),
 		DomainChecksEnabled:   map[string]bool{},
 		Apps:                  []string{},
-		CheckInterval:         Duration(5 * time.Second),
+		CheckInterval:         Duration(60 * time.Second),
+		DomainCheckInterval:   Duration(15 * time.Second),
 		IPServices:            append([]string(nil), DefaultIPServices...),
 		MinAgree:              2,
 		CheckIPv6:             true,
@@ -110,6 +114,7 @@ func Default() *Config {
 		MenuBar:               "ip",
 		UpdateCheck:           false,
 		Language:              "auto",
+		Theme:                 "auto",
 		Notifications:         true,
 	}
 }
@@ -175,6 +180,9 @@ func (c *Config) normalize() error {
 	if c.CheckInterval.D() < 3*time.Second {
 		c.CheckInterval = Duration(3 * time.Second)
 	}
+	if c.DomainCheckInterval.D() < 3*time.Second {
+		c.DomainCheckInterval = Duration(3 * time.Second)
+	}
 	if len(c.IPServices) == 0 {
 		c.IPServices = append([]string(nil), DefaultIPServices...)
 	}
@@ -210,6 +218,11 @@ func (c *Config) normalize() error {
 	default:
 		c.MenuBar = "ip"
 	}
+	switch c.Theme {
+	case "light", "dark", "auto":
+	default:
+		c.Theme = "auto"
+	}
 	switch c.Language {
 	case "auto", "ru", "en":
 	default:
@@ -239,6 +252,9 @@ func (c *Config) Clone() *Config {
 	n := *c
 	n.Apps = append([]string(nil), c.Apps...)
 	n.CustomApps = append([]CustomApp(nil), c.CustomApps...)
+	for i, app := range n.CustomApps {
+		n.CustomApps[i].Match = append([]string(nil), app.Match...)
+	}
 	n.Allow.IPs = append([]string(nil), c.Allow.IPs...)
 	n.Allow.Countries = append([]string(nil), c.Allow.Countries...)
 	n.IPServices = append([]string(nil), c.IPServices...)
@@ -279,9 +295,18 @@ func Save(path string, c *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(Render(c)), 0o644); err != nil {
+	tmp := filepath.Join(filepath.Dir(path), ".zaslon-config-"+rand.Text()+".tmp")
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(f.Name())
+	if _, err = f.WriteString(Render(c)); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }

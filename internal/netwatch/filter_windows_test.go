@@ -197,7 +197,7 @@ func TestReadOnlyWindowsFilterSnapshot(t *testing.T) {
 	t.Logf("read-only snapshot contains %d local-only Teredo candidate(s)", len(candidates))
 }
 
-func TestTeredoCanBeLearnedAfterInactiveStartupWithoutRelearningExternalActivity(t *testing.T) {
+func TestTeredoRelearnsOnlyAfterExternalAddressAndRouteDisappear(t *testing.T) {
 	h := windowsChangeHint{source: "NotifyIpInterfaceChange", family: windows.AF_INET6, luid: fixtureLUID, index: 17}
 	f := &windowsEventFilter{}
 	f.initialize(nil, nil) // Windows has not assigned an IPv6 interface/type yet.
@@ -208,27 +208,47 @@ func TestTeredoCanBeLearnedAfterInactiveStartupWithoutRelearningExternalActivity
 	if !f.ignore(h) {
 		t.Fatal("quiet, verified Teredo interface was not learned")
 	}
-	// Inactive snapshots no longer report the type; retain the proved identity.
-	f.needsRefresh.Store(true)
-	if !f.beginRefresh() {
-		t.Fatal("refresh not requested")
-	}
-	f.initialize(nil, nil)
-	if !f.ignore(h) {
-		t.Fatal("inactive snapshot forgot the verified tunnel identity")
-	}
+	ifs := []windows.MibIfRow2{{InterfaceLuid: fixtureLUID, InterfaceIndex: 17, Type: ifTypeTunnel, TunnelType: tunnelTypeTeredo}}
+	addresses := []windows.MibUnicastIpAddressRow{{InterfaceLuid: fixtureLUID, InterfaceIndex: 17, Address: windows.RawSockaddrInet6{Family: windows.AF_INET6, Addr: netip.MustParseAddr("2001:0::1").As16()}}}
+	routes := []windows.MibIpForwardRow2{{InterfaceLuid: fixtureLUID, InterfaceIndex: 17, DestinationPrefix: windows.IpAddressPrefix{Prefix: windows.RawSockaddrInet{Family: windows.AF_INET6}}, NextHop: windows.RawSockaddrInet{Family: windows.AF_INET6}}}
 	public := h
 	public.source = "NotifyRouteChange2"
 	public.prefix = netip.MustParsePrefix("::/0")
 	public.nextHop = netip.IPv6Unspecified()
-	if f.ignore(public) {
-		t.Fatal("public route filtered")
+	if f.ignore(public) || f.ignore(h) || !f.beginRefresh() {
+		t.Fatal("public route did not immediately revoke the exclusion")
 	}
-	f.needsRefresh.Store(true)
-	_ = f.beginRefresh()
+	f.initialize(candidateTeredoInterfaces(ifs, addresses, routes), nil)
+	if f.ignore(h) || !f.beginRefresh() {
+		t.Fatal("external activity did not keep the interface relevant")
+	}
+	f.initialize(candidateTeredoInterfaces(ifs, addresses, nil), nil)
+	public.kind = windows.MibDeleteInstance
+	if f.ignore(public) || f.ignore(h) || !f.beginRefresh() {
+		t.Fatal("route removal must be relevant; the remaining external address still matters")
+	}
+	f.initialize(candidateTeredoInterfaces(ifs, nil, nil), nil)
+	if !f.ignore(h) {
+		t.Fatal("fresh local-only snapshot did not restore filtering")
+	}
+}
+
+func TestTeredoExternalCallbackDuringRelearningInvalidatesSnapshot(t *testing.T) {
+	f := readyTeredoFilter()
+	local := windowsChangeHint{source: "NotifyIpInterfaceChange", family: windows.AF_INET6, luid: fixtureLUID, index: 17}
+	external := local
+	external.source = "NotifyUnicastIpAddressChange"
+	external.address = netip.MustParseAddr("2001:0::1")
+	if f.ignore(external) || !f.beginRefresh() || f.ignore(external) {
+		t.Fatal("external callback must revoke the exclusion and invalidate the new snapshot")
+	}
 	f.initialize(map[uint64]uint32{fixtureLUID: 17}, nil)
-	if f.ignore(h) {
-		t.Fatal("public activity was forgotten by a later snapshot")
+	if f.ignore(local) || !f.beginRefresh() {
+		t.Fatal("a stale local-only snapshot reinstated filtering")
+	}
+	f.initialize(nil, nil)
+	if f.ignore(local) {
+		t.Fatal("an interface missing from the snapshot was treated as proved")
 	}
 }
 

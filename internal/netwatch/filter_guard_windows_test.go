@@ -31,7 +31,7 @@ func TestNativeCallbackFilteringPreservesFreezeBeforeCurrentProbe(t *testing.T) 
 	cfg.DNSCheck = "off"
 	var id uint64
 	var requireFrozen bool
-	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "same addresses" }, NetworkVersion: e.Version, NetworkDetails: e.Details, Procs: p, StartProbe: func(_ *config.Config, current uint64, _ bool) func() {
+	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "same addresses" }, NetworkVersion: e.Version, NetworkDetails: e.Details, Procs: p, StartProbe: func(_ *config.Config, current uint64, _ guard.ProbePlan) func() {
 		if requireFrozen && !p.held {
 			t.Fatal("probe started before suspension")
 		}
@@ -66,5 +66,21 @@ func TestNativeCallbackFilteringPreservesFreezeBeforeCurrentProbe(t *testing.T) 
 	g.HandleProbe(now.Add(2200*time.Millisecond), guard.ProbeResult{ID: id, IP: "203.0.113.10", Votes: 2})
 	if p.held {
 		t.Fatal("fresh allowed result failed to resume")
+	}
+	// Removing the route still invalidates the proof. Only the subsequent
+	// clean snapshot can make local notifications quiet again.
+	requireFrozen = false
+	nativeFilteredCallback(e, f, "NotifyRouteChange2", unsafe.Pointer(&route), windows.MibDeleteInstance)
+	g.Step(now.Add(2300 * time.Millisecond))
+	if !p.held || !f.beginRefresh() {
+		t.Fatal("route removal must suspend before reclassifying the interface")
+	}
+	f.initialize(map[uint64]uint32{fixtureLUID: 17}, nil)
+	g.HandleProbe(now.Add(2400*time.Millisecond), guard.ProbeResult{ID: id, IP: "203.0.113.10", Votes: 2})
+	version := e.Version()
+	nativeFilteredCallback(e, f, "NotifyIpInterfaceChange", unsafe.Pointer(&iface), windows.MibParameterNotification)
+	g.Step(now.Add(2500 * time.Millisecond))
+	if p.held || e.Version() != version {
+		t.Fatal("confirmed local-only Teredo churn interrupted the permitted fixture")
 	}
 }

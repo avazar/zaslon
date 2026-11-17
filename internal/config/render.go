@@ -14,7 +14,7 @@ var CommentLang = "ru"
 type tpl struct {
 	rules, trusted, dns string
 	header, apps, appsList, custom, allow, ips, countries,
-	interval, services, agree, ipv6, services6, menubar, update, lang, notify string
+	domainInterval, interval, services, agree, ipv6, services6, menubar, update, theme, lang, notify string
 }
 
 var templates = map[string]tpl{
@@ -34,14 +34,16 @@ var templates = map[string]tpl{
 		ips:   "# IP или подсети: \"64.137.54.87\", \"64.137.54.0/24\"",
 		countries: "# Коды стран: NL, DE, US. VPN часто меняет IP внутри страны -\n" +
 			"# разрешите страну, и не придётся подтверждать каждый новый адрес.",
-		interval:  "# Как часто сверять внешний IP, когда всё в порядке (не меньше 3s).",
-		services:  "# Откуда узнавать внешний IP. Можно поставить свой сервер, отдающий IP текстом.",
-		agree:     "# Минимум совпадающих ответов об IP. Ответы собираются до завершения всех\n# запросов или общего тайм-аута; любое полученное расхождение запрещает возобновление.",
-		ipv6:      "# Проверять и внешний IPv6. Многие VPN заворачивают только IPv4, а по IPv6\n# программы продолжают ходить напрямую с вашим настоящим адресом.",
-		services6: "# Откуда узнавать внешний IPv6.",
-		menubar:   "# Что показывать рядом со значком (строка меню macOS, подсказка в Windows):\n# ip - страну и IP, country - только страну, icon - ничего (удобно на созвонах с показом экрана).",
-		lang:      "# Язык: auto, ru, en.",
-		notify:    "# Показывать уведомления.",
+		domainInterval: "# Интервал проверок доменов запущенных приложений (не меньше 3s).",
+		interval:       "# Как часто сверять внешний IP, когда всё в порядке (не меньше 3s).",
+		services:       "# Откуда узнавать внешний IP. Можно поставить свой сервер, отдающий IP текстом.",
+		agree:          "# Минимум совпадающих ответов об IP. Ответы собираются до завершения всех\n# запросов или общего тайм-аута; любое полученное расхождение запрещает возобновление.",
+		ipv6:           "# Проверять и внешний IPv6. Многие VPN заворачивают только IPv4, а по IPv6\n# программы продолжают ходить напрямую с вашим настоящим адресом.",
+		services6:      "# Откуда узнавать внешний IPv6.",
+		menubar:        "# Что показывать рядом со значком (строка меню macOS, подсказка в Windows):\n# ip - страну и IP, country - только страну, icon - ничего (удобно на созвонах с показом экрана).",
+		theme:          "# Тема панели: auto, light, dark.",
+		lang:           "# Язык: auto, ru, en.",
+		notify:         "# Показывать уведомления.",
 	},
 	"en": {
 		rules:   "# Per-app rules instead of the shared allow list. The key is an id from apps\n# or a custom app's name. Example:\n#   cursor:\n#     countries: [NL, DE, US]",
@@ -59,14 +61,16 @@ var templates = map[string]tpl{
 		ips:   "# IPs or subnets: \"64.137.54.87\", \"64.137.54.0/24\"",
 		countries: "# Country codes: NL, DE, US. VPNs often rotate IPs within a country -\n" +
 			"# allow the country so you don't have to confirm every new address.",
-		interval:  "# How often to re-check the public IP while everything is fine (3s minimum).",
-		services:  "# Where to get the public IP from. Any server that returns the IP as plain text works.",
-		agree:     "# Minimum matching IP responses. Collect until all requests finish or the shared\n# timeout expires; any received disagreement prevents resuming apps.",
-		ipv6:      "# Check the public IPv6 too. Many VPNs only tunnel IPv4, and apps keep\n# going out over IPv6 with your real address.",
-		services6: "# Where to get the public IPv6 from.",
-		menubar:   "# What to show next to the icon (macOS menu bar, Windows tooltip):\n# ip - country and IP, country - country only, icon - nothing (handy when sharing your screen).",
-		lang:      "# Language: auto, ru, en.",
-		notify:    "# Show notifications.",
+		domainInterval: "# Check service domains of running apps at this interval (3s minimum).",
+		interval:       "# How often to re-check the public IP while everything is fine (3s minimum).",
+		services:       "# Where to get the public IP from. Any server that returns the IP as plain text works.",
+		agree:          "# Minimum matching IP responses. Collect until all requests finish or the shared\n# timeout expires; any received disagreement prevents resuming apps.",
+		ipv6:           "# Check the public IPv6 too. Many VPNs only tunnel IPv4, and apps keep\n# going out over IPv6 with your real address.",
+		services6:      "# Where to get the public IPv6 from.",
+		menubar:        "# What to show next to the icon (macOS menu bar, Windows tooltip):\n# ip - country and IP, country - country only, icon - nothing (handy when sharing your screen).",
+		theme:          "# Panel theme: auto, light, dark.",
+		lang:           "# Language: auto, ru, en.",
+		notify:         "# Show notifications.",
 	},
 }
 
@@ -179,6 +183,7 @@ func Render(c *Config) string {
 	}
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "%s\ncheck_interval: %s\n\n", t.interval, c.CheckInterval)
+	fmt.Fprintf(&b, "%s\ndomain_check_interval: %s\n\n", t.domainInterval, c.DomainCheckInterval)
 	fmt.Fprintf(&b, "%s\nip_services:%s\n\n", t.services, list(c.IPServices))
 	fmt.Fprintf(&b, "%s\nmin_agree: %d\n\n", t.agree, c.MinAgree)
 	fmt.Fprintf(&b, "%s\ncheck_ipv6: %t\n\n", t.ipv6, c.CheckIPv6)
@@ -199,6 +204,7 @@ func Render(c *Config) string {
 	fmt.Fprintf(&b, "%s\nmenubar: %s\n\n", t.menubar, c.MenuBar)
 	fmt.Fprintf(&b, "%s\nupdate_check: %t\n\n", t.update, c.UpdateCheck)
 	fmt.Fprintf(&b, "%s\nlanguage: %s\n\n", t.lang, c.Language)
+	fmt.Fprintf(&b, "%s\ntheme: %s\n\n", t.theme, c.Theme)
 	fmt.Fprintf(&b, "%s\nnotifications: %t\n", t.notify, c.Notifications)
 	return b.String()
 }

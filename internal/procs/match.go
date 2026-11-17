@@ -29,6 +29,8 @@ type Proc struct {
 	App        string   // which protected app it belongs to (display name)
 	AppID      string   // its preset id or lowercased custom name
 	PolicyIDs  []string // matching app and ancestor policies; one owner controls suspension
+	Control    bool     `json:"-"` // verified own control process/private panel member, never a user app
+	control    controlRole
 }
 
 // SameProcess also works for synthetic processes used by pure guard tests.
@@ -216,7 +218,7 @@ func Filter(all []Proc, ts []Target, self int) []Proc {
 	}
 	var queue []int
 	for _, p := range all {
-		if p.PID == self || p.PID <= 1 {
+		if p.PID <= 1 {
 			continue
 		}
 		for _, t := range ts {
@@ -250,7 +252,7 @@ func Filter(all []Proc, ts []Target, self int) []Proc {
 		pid := queue[0]
 		queue = queue[1:]
 		for _, c := range children[pid] {
-			if c == self || c <= 1 {
+			if c <= 1 {
 				continue
 			}
 			if _, seen := app[c]; !seen {
@@ -272,6 +274,9 @@ func Filter(all []Proc, ts []Target, self int) []Proc {
 	out := make([]Proc, 0, len(app))
 	for pid, t := range app {
 		p := byPID[pid]
+		if pid == self || p.Control {
+			continue
+		}
 		p.App, p.AppID = t.Name, t.ID
 		p.PolicyIDs = nil
 		for id := range policies[pid] {

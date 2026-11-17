@@ -42,7 +42,7 @@ func TestIgnoredFailureIsWarningInPanelTrayAndNotifications(t *testing.T) {
 	c.Allow.IPs = []string{"203.0.113.10"}
 	c.IPv6UnavailableAction = config.IgnoreFailure
 	var id uint64
-	g := guard.New(c, guard.Deps{Procs: noProcs{}, Fingerprint: func() string { return "fixture" }, StartProbe: func(_ *config.Config, v uint64, _ bool) func() { id = v; return nil }})
+	g := guard.New(c, guard.Deps{Procs: noProcs{}, Fingerprint: func() string { return "fixture" }, StartProbe: func(_ *config.Config, v uint64, _ guard.ProbePlan) func() { id = v; return nil }})
 	now := time.Now()
 	g.Step(now)
 	g.HandleProbe(now, guard.ProbeResult{ID: id, IP: "203.0.113.10", Votes: 2, IPv6Unknown: true})

@@ -27,8 +27,8 @@ func TestMessagesComplete(t *testing.T) {
 func TestEveryEventHasText(t *testing.T) {
 	for _, lang := range []string{"ru", "en"} {
 		Lang = lang
-		for k := guard.EvAutoAllowed; k <= guard.EvAllowedCountry; k++ {
-			e := guard.Event{At: time.Now(), Kind: k, IP: "1.2.3.4", Country: "NL", Apps: []string{"Claude"}, Dur: 20 * time.Second, Notify: true}
+		for k := guard.EvAutoAllowed; k <= guard.EvHoldReason; k++ {
+			e := guard.Event{At: time.Now(), Kind: k, IP: "1.2.3.4", Country: "NL", Apps: []string{"Claude"}, Dur: 20 * time.Second, Notify: true, Error: "fixture error"}
 			line := EventLine(e)
 			if len(line) < 12 {
 				t.Errorf("%s: empty history line for kind %d", lang, k)

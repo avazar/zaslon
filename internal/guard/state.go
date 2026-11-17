@@ -2,6 +2,7 @@ package guard
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ const (
 	EvOffline                      // internet is gone
 	EvOnline                       // internet is back
 	EvFrozen                       // apps frozen (Reason says why)
-	EvResumed                      // a current check permits the network, apps continue
+	EvResumed                      // owned suspensions were released successfully
 	EvBlocked                      // legacy event; no longer emitted by the guard
 	EvKilledNew                    // legacy event; no longer emitted by the guard
 	EvUnblocked                    // allowed IP is back after a block
@@ -31,6 +32,7 @@ const (
 	EvTrusted // on a trusted network (or it was just added)
 	EvProcessError
 	EvDomainCheck // failed service measurements, including failures explicitly ignored by policy
+	EvHoldReason  // existing suspensions remain necessary for a different reason
 )
 
 type Event struct {
@@ -38,6 +40,7 @@ type Event struct {
 	Kind            EventKind
 	Reason          Reason
 	IP, Country     string
+	Issues          []DomainIssue
 	Domain          string
 	IP6, Country6   string
 	IPv6Unknown     bool
@@ -53,7 +56,14 @@ type Event struct {
 }
 
 // GroupState is one set of apps sharing rules, for the panel.
+type DomainIssue struct {
+	Endpoint string
+	Reason   Reason
+	Timeout  bool
+}
+
 type GroupState struct {
+	Issues   []DomainIssue
 	Key      string // "" for the shared rules
 	Apps     []string
 	Status   Status
@@ -70,7 +80,9 @@ type CheckWarning struct {
 }
 
 type Snapshot struct {
-	Status          Status // the worst of the groups
+	DomainCountry   string    // Display only: a recent service measurement of the same IPv4.
+	MeasuredAt      time.Time // start of the last accepted general measurement
+	Status          Status    // the worst of the groups
 	Reason          Reason
 	IP, Country     string
 	IP6, Country6   string
@@ -87,6 +99,7 @@ type Snapshot struct {
 	PausedUntil     time.Time    // zero if not paused
 	Running         []procs.Proc // protected apps' processes right now
 	Frozen          int
+	FrozenApps      map[string]int
 	Groups          []GroupState
 	Counters        Counters
 	Config          *config.Config
@@ -97,8 +110,8 @@ type Snapshot struct {
 
 func (g *Guard) snapshot(now time.Time) Snapshot {
 	s := Snapshot{
-		Status: OK,
-		IP:     g.ip, Country: g.country, IP6: g.ip6, Country6: g.cc6, Others: append([]string(nil), g.others...),
+		Status: OK, MeasuredAt: g.measuredAt,
+		IP: g.ip, Country: g.country, IP6: g.ip6, Country6: g.cc6, Others: append([]string(nil), g.others...),
 		DNS: g.dns, DNSCountry: g.dnsCC, NetID: g.netID,
 		Offline: g.offline, Checking: g.probing,
 		IPv6Unknown:     g.ipv6Unknown,
@@ -121,8 +134,13 @@ func (g *Guard) snapshot(now time.Time) Snapshot {
 	first := true
 	for _, gr := range g.groups {
 		gs := GroupState{Key: gr.key, Apps: gr.names(), Status: gr.status, Reason: gr.reason, Frozen: len(gr.frozen)}
+		idle := g.cfg.DomainCheckEnabled(gr.key) && !g.activeDomains[gr.key]
+		if idle {
+			gs.Status, gs.Reason = OK, NoReason
+		}
+		gs.Issues = g.domainIssues(gr, now)
 		gs.Domains = append([]DomainResult(nil), g.domains[gr.key]...)
-		if g.verified && !g.paused(now) && len(gr.tgts) > 0 {
+		if !idle && (g.verified || g.readyGroups[gr.key]) && !g.paused(now) && len(gr.tgts) > 0 {
 			gs.Warnings = append([]Reason(nil), g.assess(gr, now).ignored...)
 			for _, reason := range gs.Warnings {
 				s.Warnings = append(s.Warnings, CheckWarning{Reason: reason, Apps: gr.names()})
@@ -131,19 +149,59 @@ func (g *Guard) snapshot(now time.Time) Snapshot {
 		if gr.status == OK && len(gr.frozen) > 0 {
 			gs.Status, gs.Reason = Suspect, ProcessPolicyDenied
 		}
+		for _, p := range gr.frozen {
+			if s.FrozenApps == nil {
+				s.FrozenApps = make(map[string]int)
+			}
+			s.FrozenApps[p.AppID]++
+			if gs.Reason == ProcessPolicyDenied && g.awaitingAppCheck(p) {
+				gs.Reason = AppCheckPending
+			}
+		}
 		gs.Running = procs.AppNames(gr.running)
 		s.Running = append(s.Running, gr.running...)
 		s.Frozen += len(gr.frozen)
 		if gr.key == "" {
-			s.AllowedNow = g.verified && g.ip != "" && !g.offline && g.verdict(gr, now) == NoReason
+			s.AllowedNow = (g.verified || g.generalReady) && g.ip != "" && !g.offline && g.verdict(gr, now) == NoReason
 		}
-		if len(gr.tgts) > 0 && (first || worse(gs.Status, s.Status)) {
+		if !idle && len(gr.tgts) > 0 && (first || worse(gs.Status, s.Status)) {
 			s.Status, s.Reason = gs.Status, gs.Reason
 			first = false
 		}
 		s.Groups = append(s.Groups, gs)
 	}
+	if s.Country == "" && s.IP != "" && !s.Offline && (g.verified || g.generalReady) && len(s.Others) == 0 && g.votes >= g.cfg.Need() {
+		s.DomainCountry = g.matchingDomainCountry(now)
+	}
 	return s
+}
+
+// DisplayCountry is presentation data. Grants and policy checks use Country.
+func (s Snapshot) DisplayCountry() string {
+	if s.Country != "" {
+		return s.Country
+	}
+	return s.DomainCountry
+}
+
+func (g *Guard) matchingDomainCountry(now time.Time) string {
+	var country string
+	for _, gr := range g.groups {
+		if !g.cfg.DomainCheckEnabled(gr.key) {
+			continue
+		}
+		for _, d := range g.domains[gr.key] {
+			if d.IP != g.ip || d.Country == "" || d.Error != "" || d.CheckedAt.Before(g.domainStarted) ||
+				d.CheckedAt.After(now) || now.Sub(d.CheckedAt) >= g.domainMaxAge() || !slices.Contains(g.cfg.DomainChecks[gr.key], d.Endpoint) {
+				continue
+			}
+			if country != "" && d.Country != country {
+				return ""
+			}
+			country = d.Country
+		}
+	}
+	return country
 }
 
 // Paused reports whether protection is paused.
@@ -155,12 +213,12 @@ func (s Snapshot) Allowed() bool { return s.AllowedNow && len(s.Errors) == 0 && 
 // key changes whenever something visible in the menu changes.
 func (s Snapshot) key() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%v|", s.Errors)
+	fmt.Fprintf(&b, "%s|%v|%v|%s|%s|%t|%t|", s.DomainCountry, s.Errors, s.MeasuredAt, s.Config.Language, s.Config.Theme, s.Config.Notifications, s.Config.UpdateCheck)
 	fmt.Fprintf(&b, "%d|%d|%s|%s|%s|%s|%v|%s|%s|%s|%t|%d|%v|%d|%t|", s.Status, s.Reason, s.IP, s.Country, s.IP6, s.Country6,
 		s.Others, s.DNS, s.DNSCountry, s.Network, s.Offline, s.Frozen, s.PausedUntil.Unix(), len(s.Running), s.Checking)
 	for _, gr := range s.Groups {
 		fmt.Fprintf(&b, "%d%d%v;", gr.Status, gr.Reason, gr.Running)
-		fmt.Fprintf(&b, "%v;", gr.Domains)
+		fmt.Fprintf(&b, "%v%v;", gr.Domains, gr.Issues)
 	}
 	fmt.Fprintf(&b, "|%v|%v|%v|%v|%v|%s", s.Config.Allow, s.Config.Apps, len(s.Config.CustomApps), s.Config.AppRules, s.Config.TrustedNetworks, s.Config.MenuBar)
 	fmt.Fprintf(&b, "|%v", s.Config.DomainChecks)

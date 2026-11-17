@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -184,7 +183,7 @@ func testBrowserLifecycle(t *testing.T, browser, url string, manualClose bool) {
 		eventually(t, "browser renderer did not load the fixture", func() bool {
 			buf := make([]uint16, 256)
 			getTitle.Call(owned.hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-			return strings.Contains(windows.UTF16ToString(buf), "Zaslon isolated panel test")
+			return windows.UTF16ToString(buf) == "Zaslon isolated panel test"
 		})
 	}
 	// Simulate a late browser/favicon update after the native window appears.

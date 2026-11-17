@@ -70,6 +70,9 @@ func TestFailedResumeRemainsTrackedAndRetried(t *testing.T) {
 	if s.Frozen != 0 || len(s.Errors) != 0 || h.p.frozen[claude.PID] {
 		t.Fatal("resume was not retried")
 	}
+	if !h.had(EvResumed) {
+		t.Fatal("successful retry was not logged")
+	}
 }
 
 func TestFrozenChildSurvivesParentExitInRecoveryTracking(t *testing.T) {

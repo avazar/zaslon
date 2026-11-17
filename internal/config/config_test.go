@@ -51,7 +51,9 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		c.Allow.IPs = []string{"64.137.54.87", "10.0.0.0/8"}
 		c.Allow.Countries = []string{"NL", "DE"}
 		c.CheckInterval = Duration(90 * time.Second)
+		c.DomainCheckInterval = Duration(21 * time.Second)
 		c.MenuBar = "country"
+		c.Theme = "light"
 		c.AppRules = map[string]Allow{"cursor": {Countries: []string{"DE", "US"}}, "my app": {IPs: []string{"1.2.3.4"}}}
 		c.TrustedNetworks = []TrustedNetwork{{Name: "Дом", ID: "aa:bb:cc:dd:ee:ff"}}
 		c.DNSCheck = "block"
@@ -62,7 +64,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		if Render(got) != Render(c) {
 			t.Fatalf("%s: round trip differs:\n%s\n---\n%s", lang, Render(c), Render(got))
 		}
-		if got.CheckInterval.D() != 90*time.Second || got.CustomApps[0].Match[1] != "myapp.exe" {
+		if got.Theme != "light" || got.CheckInterval.D() != 90*time.Second || got.DomainCheckInterval.D() != 21*time.Second || got.CustomApps[0].Match[1] != "myapp.exe" {
 			t.Fatalf("%s: values lost: %+v", lang, got)
 		}
 	}
@@ -92,7 +94,7 @@ func TestParseValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Allow.Countries[0] != "NL" || c.CheckInterval.D() != 3*time.Second || c.Language != "auto" {
+	if c.Allow.Countries[0] != "NL" || c.CheckInterval.D() != 3*time.Second || c.Language != "auto" || c.Theme != "auto" {
 		t.Fatalf("not normalized: %+v", c)
 	}
 	if c.MinAgree != 2 || !c.CheckIPv6 {
@@ -140,16 +142,19 @@ func TestAllowMatches(t *testing.T) {
 	}
 }
 
-func TestAddIPv6AsNetwork(t *testing.T) {
+func TestIPv6PermissionUsesOnlyExplicitScope(t *testing.T) {
 	var a Allow
-	if !a.AddIP("2a02:2698:1:2:aaaa::1") || a.IPs[0] != "2a02:2698:1:2::/64" {
+	if !a.AddIP("2a02:2698:1:2:aaaa::1") || a.IPs[0] != "2a02:2698:1:2:aaaa::1" {
 		t.Fatalf("%v", a.IPs)
 	}
-	if a.AddIP("2a02:2698:1:2:bbbb::2") {
-		t.Fatal("same /64 added twice")
+	if a.Matches("2a02:2698:1:2:bbbb::2", "") {
+		t.Fatal("a single IPv6 granted its neighbours")
 	}
-	if !a.Matches("2a02:2698:1:2:cccc::3", "") {
-		t.Fatal("/64 doesn't match")
+	if !a.AddIP("2a02:2698:1:2::/64") || !a.Matches("2a02:2698:1:2:cccc::3", "") {
+		t.Fatal("an explicitly requested /64 was not honoured")
+	}
+	if a.AddIP("2a02:2698:1:2:bbbb::2") {
+		t.Fatal("address covered by the explicit subnet added again")
 	}
 	a.IPs = []string{"10.0.0.0/8"}
 	if a.AddIP("10.1.2.3") {

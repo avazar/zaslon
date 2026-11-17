@@ -91,7 +91,7 @@ func TestSettingsEditWhileCheckingCannotUsePreviousAllowedIP(t *testing.T) {
 	h.step(time.Millisecond)
 	oldID := h.g.probeID
 	c := h.g.cfg.Clone()
-	c.Notifications = false
+	c.CheckIPv6 = !c.CheckIPv6
 	h.g.SetConfig(h.now, c)
 	if !h.p.frozen[claude.PID] {
 		t.Fatal("settings edit resumed using a cached IP")
@@ -171,7 +171,7 @@ func TestInconclusiveIPv6CannotResumeOnAllowedIPv4(t *testing.T) {
 	h.probeFull(ProbeResult{IP: "1.2.3.4", Votes: 2, IP6: "2001:db9::1"})
 	h.want(Suspect)
 	h.probeFull(ProbeResult{IP: "1.2.3.4", Votes: 2, IPv6Unknown: true})
-	if !h.p.frozen[claude.PID] || h.g.Snapshot(h.now).Reason != IPv6Unconfirmed {
+	if !h.p.frozen[claude.PID] || h.g.Snapshot(h.now).Reason != IPv6Leak {
 		t.Fatal("IPv6 failure treated as no IPv6")
 	}
 	h.probeFull(ProbeResult{IP: "1.2.3.4", Votes: 2, IP6: "2001:db8::1"})

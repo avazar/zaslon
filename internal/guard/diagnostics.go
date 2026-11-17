@@ -27,6 +27,24 @@ func (g *Guard) domainDiagnostics(gr *group, now time.Time) []string {
 	if !g.cfg.DomainCheckEnabled(gr.key) || len(gr.tgts) == 0 {
 		return nil
 	}
+	if hold, ok := g.earlyDenials[gr.key]; ok {
+		d := hold.sample
+		family, ip, cc, problem := "IPv4", d.IP, d.Country, d.Error
+		if hold.ipv6 {
+			family, ip, cc, problem = "IPv6", d.IP6, d.Country6, d.IPv6Error
+		}
+		if problem == "" {
+			switch {
+			case ip == "":
+				problem = "no address returned"
+			case cc == "":
+				problem = fmt.Sprintf("exit %s, country unknown", ip)
+			default:
+				problem = fmt.Sprintf("exit %s (%s) is not allowed", ip, cc)
+			}
+		}
+		return []string{fmt.Sprintf("%s %s: %s", d.Endpoint, family, DiagnosticText(problem))}
+	}
 	var details []string
 	expected := g.cfg.DomainChecks[gr.key]
 	if len(expected) == 0 {
@@ -52,8 +70,8 @@ func (g *Guard) domainDiagnostics(gr *group, now time.Time) []string {
 			missing = "measurement predates the current check"
 		case d.CheckedAt.After(now):
 			missing = "measurement timestamp is in the future"
-		case now.Sub(d.CheckedAt) >= DomainMaxAge:
-			missing = fmt.Sprintf("measurement expired (age=%s, limit=%s)", now.Sub(d.CheckedAt).Round(time.Millisecond), DomainMaxAge)
+		case now.Sub(d.CheckedAt) >= g.domainMaxAge():
+			missing = fmt.Sprintf("measurement expired (age=%s, limit=%s)", now.Sub(d.CheckedAt).Round(time.Millisecond), g.domainMaxAge())
 		}
 		if missing != "" {
 			details = append(details, endpoint+": "+missing)
@@ -63,12 +81,16 @@ func (g *Guard) domainDiagnostics(gr *group, now time.Time) []string {
 			details = append(details, endpoint+" IPv4: "+DiagnosticText(d.Error))
 		} else if d.IP == "" {
 			details = append(details, endpoint+" IPv4: no address returned")
+		} else if addressReason(g.allowFor(gr), d.IP, d.Country, DomainIPNotAllowed, CountryUnknown) == CountryUnknown {
+			details = append(details, fmt.Sprintf("%s IPv4: country unknown for %s", endpoint, d.IP))
 		} else if !g.allowFor(gr).Matches(d.IP, d.Country) {
 			details = append(details, fmt.Sprintf("%s IPv4: exit %s (%s) is not allowed", endpoint, d.IP, d.Country))
 		}
 		if g.cfg.CheckIPv6 {
 			if d.IPv6Error != "" {
 				details = append(details, endpoint+" IPv6: "+DiagnosticText(d.IPv6Error))
+			} else if addressReason(g.allowFor(gr), d.IP6, d.Country6, DomainIPNotAllowed, CountryUnknown) == CountryUnknown {
+				details = append(details, fmt.Sprintf("%s IPv6: country unknown for %s", endpoint, d.IP6))
 			} else if d.IP6 != "" && !g.allowFor(gr).Matches(d.IP6, d.Country6) {
 				details = append(details, fmt.Sprintf("%s IPv6: exit %s (%s) is not allowed", endpoint, d.IP6, d.Country6))
 			}
@@ -79,6 +101,9 @@ func (g *Guard) domainDiagnostics(gr *group, now time.Time) []string {
 
 func (g *Guard) recordDomainDiagnostics(now time.Time, id uint64) {
 	for _, gr := range g.groups {
+		if !g.plan.Apps[gr.key] {
+			continue
+		}
 		if details := g.domainDiagnostics(gr, now); len(details) > 0 {
 			details = append([]string{fmt.Sprintf("check=%d", id)}, details...)
 			g.emit(now, Event{Kind: EvDomainCheck, Apps: gr.names(), Details: details})

@@ -18,93 +18,50 @@ func timedOutReply(h *harness, ipv6 bool) ProbeResult {
 	return r
 }
 
-func TestDomainTimeoutRetriesAfterFreezeAndRequiresFreshSuccess(t *testing.T) {
-	h := domainHarness(t)
-	h.probeFull(domainReply(h, "203.0.113.10", "198.51.100.20"))
-	var ids []uint64
-	var requested []bool
-	requireHeld := false
-	h.g.d.StartProbe = func(_ *config.Config, id uint64, domains bool) func() {
-		if requireHeld && (!h.p.frozen[100] || !h.p.frozen[101] || h.p.frozen[200] || h.p.frozen[201]) {
-			t.Error("retry started before freezing the affected tree or froze another app")
-		}
-		ids = append(ids, id)
-		requested = append(requested, domains)
-		return func() {}
-	}
-	h.step(DomainInterval)
-	oldID := h.g.probeID
-	h.step(4 * time.Second)
-	requireHeld = true
-	r := timedOutReply(h, false)
-	r.ID = oldID
-	h.g.HandleProbe(h.now, r)
-	if len(ids) != 2 || !requested[1] || ids[1] == oldID || h.g.probeStarted != h.now {
-		t.Fatal("timeout did not start an immediate, separately numbered domain check")
-	}
-	// The former request cannot release this hold after its retry has started.
-	stale := domainReply(h, "203.0.113.10", "198.51.100.20")
-	stale.ID = oldID
-	h.g.HandleProbe(h.now, stale)
-	if !h.p.frozen[100] || !h.p.frozen[101] || len(ids) != 2 {
-		t.Fatal("stale success resumed processes or duplicated the retry")
-	}
-	// Even a new result must obey all domains and the app's allow-list.
-	bad := domainReply(h, "192.0.2.99", "198.51.100.20")
-	bad.ID = h.g.probeID
-	h.g.HandleProbe(h.now, bad)
-	if !h.p.frozen[100] || !h.p.frozen[101] {
-		t.Fatal("retry resumed a forbidden exit")
-	}
-	requireHeld = false
-	h.step(DomainInterval)
-	fresh := domainReply(h, "203.0.113.10", "198.51.100.20")
-	fresh.ID = h.g.probeID
-	h.g.HandleProbe(h.now, fresh)
-	if h.p.frozen[100] || h.p.frozen[101] {
-		t.Fatal("verified retry-cycle result did not resume tree")
-	}
+// Family samples are delivered before the worker repeats the single request.
+func timeoutDecision(h *harness, r ProbeResult, ipv6 bool) bool {
+	reply := make(chan bool, 1)
+	h.g.HandleProbe(h.now, ProbeResult{ID: r.ID, Part: DomainFamily, Sample: r.Domains["claude"][0], SampleIPv6: ipv6, Retry: reply})
+	return <-reply
 }
 
-func TestDomainTimeoutImmediateRetryIsBoundedAndRearmsOnSuccess(t *testing.T) {
-	h := domainHarness(t)
-	h.probeFull(domainReply(h, "203.0.113.10", "198.51.100.20"))
-	h.step(DomainInterval)
-	r := timedOutReply(h, false)
-	r.ID = h.g.probeID
-	h.g.HandleProbe(h.now, r)
-	retryID := h.g.probeID
-	r = timedOutReply(h, false)
-	r.ID = retryID
-	h.g.HandleProbe(h.now, r)
-	if h.g.probing || h.g.probeID != retryID || !h.p.frozen[100] || !h.p.frozen[101] {
-		t.Fatal("failed retry looped or resumed the app")
-	}
-	h.step(FastCheck)
-	if h.g.checkingDomains {
-		t.Fatal("failed immediate retry bypassed normal domain cadence again")
-	}
-	g := ProbeResult{ID: h.g.probeID}
-	h.g.HandleProbe(h.now, g)
-	if !h.p.frozen[100] {
-		t.Fatal("general check bypassed domain failure")
-	}
-	h.step(DomainInterval)
-	fresh := domainReply(h, "203.0.113.10", "198.51.100.20")
-	fresh.ID = h.g.probeID
-	h.g.HandleProbe(h.now, fresh)
-	h.step(DomainInterval)
-	id := h.g.probeID
-	r = timedOutReply(h, false)
-	r.ID = id
-	h.g.HandleProbe(h.now, r)
-	if !h.g.probing || !h.g.checkingDomains || h.g.probeID != id+1 {
-		t.Fatal("verified success did not rearm the next suspension's retry")
+func TestDomainTimeoutRetriesOnlyWhileHeldAndRearmsAfterSuccess(t *testing.T) {
+	for _, ipv6 := range []bool{false, true} {
+		h := domainHarness(t)
+		good := func() ProbeResult { return domainReply(h, "203.0.113.10", "198.51.100.20") }
+		h.probeFull(good())
+		h.step(DomainInterval)
+		r := timedOutReply(h, ipv6)
+		r.ID = h.g.probeID
+		if !timeoutDecision(h, r, ipv6) || !h.p.frozen[100] || !h.p.frozen[101] || h.p.frozen[200] || h.p.frozen[201] {
+			t.Fatal("targeted retry requires the affected tree to be held")
+		}
+		if timeoutDecision(h, r, ipv6) {
+			t.Fatal("retry loop")
+		}
+		h.probeFull(r)
+		h.step(DomainInterval)
+		r.ID = h.g.probeID
+		if timeoutDecision(h, r, ipv6) {
+			t.Fatal("uninterrupted failure rearmed retry")
+		}
+		success := good()
+		h.g.HandleProbe(h.now, ProbeResult{Part: DomainGroup, ID: r.ID, Domains: success.Domains})
+		h.probeFull(success)
+		if h.p.frozen[100] {
+			t.Fatal("fresh success did not resume application")
+		}
+		h.step(DomainInterval)
+		r = timedOutReply(h, ipv6)
+		r.ID = h.g.probeID
+		if !timeoutDecision(h, r, ipv6) {
+			t.Fatal("new timeout did not retry")
+		}
 	}
 }
 
 func TestDomainTimeoutRetryHonoursFailurePoliciesAndEvidence(t *testing.T) {
-	for _, mode := range []string{"ipv6", "ignore-ipv6", "ignore-ip", "403", "forbidden-other-domain", "missing", "stale-timeout", "network-change", "no-processes"} {
+	for _, mode := range []string{"ignore-ip", "ignore-ipv6", "403", "stale", "network-change", "no-processes", "denied"} {
 		t.Run(mode, func(t *testing.T) {
 			h := domainHarness(t)
 			if mode == "ignore-ip" {
@@ -113,110 +70,131 @@ func TestDomainTimeoutRetryHonoursFailurePoliciesAndEvidence(t *testing.T) {
 			if mode == "ignore-ipv6" {
 				h.g.cfg.IPv6UnavailableAction = config.IgnoreFailure
 			}
-			h.probeFull(domainReply(h, "203.0.113.10", "198.51.100.20"))
+			good := domainReply(h, "203.0.113.10", "198.51.100.20")
+			if mode == "denied" {
+				good.Domains["claude"][0].IP = "192.0.2.99"
+			}
+			h.probeFull(good)
 			h.step(DomainInterval)
-			id := h.g.probeID
-			r := timedOutReply(h, mode == "ipv6" || mode == "ignore-ipv6")
-			r.ID = id
-			d := &r.Domains["claude"][0]
+			v6 := mode == "ignore-ipv6"
+			r := timedOutReply(h, v6)
+			r.ID = h.g.probeID
 			switch mode {
 			case "403":
-				d.Error, d.Timeout = "HTTP 403", false
-			case "forbidden-other-domain":
-				h.g.cfg.DomainChecks["claude"] = append(h.g.cfg.DomainChecks["claude"], "https://other.example/cdn-cgi/trace")
-				r.Domains["claude"] = append(r.Domains["claude"], DomainResult{Endpoint: "https://other.example/cdn-cgi/trace", IP: "192.0.2.99", CheckedAt: h.now})
-			case "missing":
-				delete(r.Domains, "claude")
-			case "stale-timeout":
-				d.CheckedAt = h.now.Add(-time.Hour)
+				r.Domains["claude"][0].Timeout = false
+				r.Domains["claude"][0].Error = "HTTP 403"
+			case "stale":
+				r.Domains["claude"][0].CheckedAt = h.now.Add(-time.Hour)
 			case "network-change":
 				h.revision++
 			case "no-processes":
 				h.p.remove(100)
 				h.p.remove(101)
 			}
-			h.g.HandleProbe(h.now, r)
-			wantRetry := mode == "ipv6"
-			if mode == "network-change" { // only the new network's own check may exist
-				if !h.p.frozen[100] || h.g.domains["claude"] != nil {
-					t.Fatal("old network's timeout crossed revision")
-				}
-				return
-			}
-			if (h.g.probeID == id+1) != wantRetry {
-				t.Fatalf("mode=%s retry=%v", mode, h.g.probeID != id)
-			}
-			if wantRetry && (!h.p.frozen[100] || !h.p.frozen[101]) {
-				t.Fatal("IPv6 retry did not keep tree suspended")
+			if timeoutDecision(h, r, v6) {
+				t.Fatal("unexpected retry")
 			}
 		})
 	}
 }
 
-func TestDomainRetryRequiresEveryDomainAndCurrentNetwork(t *testing.T) {
-	for _, mode := range []string{"missing-domain", "old-domain", "network-change"} {
-		t.Run(mode, func(t *testing.T) {
-			h := domainHarness(t)
-			other := "https://second.example/cdn-cgi/trace"
-			c := h.g.cfg.Clone()
-			c.DomainChecks["claude"] = append(c.DomainChecks["claude"], other)
-			h.g.SetConfig(h.now, c)
-			complete := func() ProbeResult {
-				r := domainReply(h, "203.0.113.10", "198.51.100.20")
-				r.Domains["claude"] = append(r.Domains["claude"], DomainResult{Endpoint: other, IP: "203.0.113.10", CheckedAt: h.now})
-				return r
-			}
-			h.probeFull(complete())
-			h.step(DomainInterval)
-			r := complete()
-			r.Domains["claude"][0].Error, r.Domains["claude"][0].Timeout = "deadline", true
-			r.ID = h.g.probeID
-			h.g.HandleProbe(h.now, r)
-			r = complete()
-			r.ID = h.g.probeID
-			switch mode {
-			case "missing-domain":
-				r.Domains["claude"] = r.Domains["claude"][:1]
-			case "old-domain":
-				r.Domains["claude"][1].CheckedAt = h.now.Add(-time.Second)
-			case "network-change":
-				h.revision++
-			}
-			h.g.HandleProbe(h.now, r)
-			if !h.p.frozen[100] || !h.p.frozen[101] {
-				t.Fatal("incomplete or old-network retry success resumed processes")
-			}
-			if mode != "network-change" {
-				h.step(DomainInterval)
-			}
-			r = complete()
-			r.ID = h.g.probeID
-			h.g.HandleProbe(h.now, r)
-			if h.p.frozen[100] || h.p.frozen[101] {
-				t.Fatal("complete current-network success did not resume processes")
-			}
-		})
-	}
-}
-
-func TestDomainRetrySuccessStillObeysChildPolicy(t *testing.T) {
+func TestTargetedRetryStillRequiresSiblingAndAncestorPolicies(t *testing.T) {
 	h := domainHarness(t)
 	h.p.procs[2].PPID = 100
-	h.step(0)
-	h.probeFull(domainReply(h, "203.0.113.10", "198.51.100.20"))
-	h.step(DomainInterval)
+	cfg := h.g.cfg.Clone()
+	cfg.DomainChecks["claude"] = append(cfg.DomainChecks["claude"], "second")
+	h.g.SetConfig(h.now, cfg)
 	r := timedOutReply(h, false)
 	r.ID = h.g.probeID
+	if !timeoutDecision(h, r, false) {
+		t.Fatal("missing retry")
+	}
+	allowed := domainReply(h, "203.0.113.10", "192.0.2.99")
+	allowed.ID = r.ID
+	h.g.HandleProbe(h.now, ProbeResult{ID: r.ID, Part: DomainGroup, Domains: allowed.Domains})
+	if !h.p.frozen[100] || !h.p.frozen[200] {
+		t.Fatal("partial group released process")
+	}
+	allowed.Domains["claude"] = append(allowed.Domains["claude"], DomainResult{Endpoint: "second", IP: "203.0.113.10", CheckedAt: h.now})
+	h.probeFull(allowed)
+	if h.p.frozen[100] || !h.p.frozen[200] || !h.p.frozen[201] {
+		t.Fatal("retry bypassed child policy")
+	}
+}
+
+func TestIdleAppRelaunchRequiresNewDomainProbe(t *testing.T) {
+	h := domainHarness(t)
+	h.g.cfg.CheckInterval = config.Duration(time.Minute)
+	good := func() ProbeResult { return domainReply(h, "203.0.113.10", "198.51.100.20") }
+	h.probeFull(good())
+	generalAt := h.g.measuredAt
+	oldProcs := append(h.p.procs[:0:0], h.p.procs...)
+	h.step(DomainInterval)
+	old := h.g.probeID
+	h.p.procs = nil
+	h.step(time.Millisecond)
+	h.p.procs = oldProcs[:2]
+	h.step(time.Millisecond)
+	if !h.p.frozen[100] {
+		t.Fatal("relaunched app reused previous proof")
+	}
+	r := good()
+	r.ID = old
 	h.g.HandleProbe(h.now, r)
-	for _, pid := range []int{100, 101, 200, 201} {
-		if !h.p.frozen[pid] {
-			t.Fatal("parent timeout failed to hold descendant")
+	if !h.p.frozen[100] {
+		t.Fatal("old in-flight reply released new session")
+	}
+	h.step(0)
+	if h.g.plan.General || len(h.g.plan.Apps) != 1 || !h.g.plan.Apps["claude"] {
+		t.Fatalf("wrong sources: %+v", h.g.plan)
+	}
+	h.probeFull(good())
+	if h.p.frozen[100] || h.g.measuredAt != generalAt {
+		t.Fatal("domain-only result did not release or changed general IP")
+	}
+	h.p.procs = nil
+	h.step(time.Millisecond)
+	h.step(DomainInterval)
+	if h.g.probing {
+		t.Fatal("idle apps scheduled a domain check")
+	}
+	h.step(time.Minute)
+	if !h.g.plan.General || len(h.g.plan.Apps) != 0 {
+		t.Fatal("general IP should run alone")
+	}
+}
+
+func TestSecondEndpointAttributedToHold(t *testing.T) {
+	h := domainHarness(t)
+	c := h.g.cfg.Clone()
+	c.DomainChecks["claude"] = append(c.DomainChecks["claude"], "https://api.claude.example/check")
+	h.g.SetConfig(h.now, c)
+	r := domainReply(h, "203.0.113.10", "198.51.100.20")
+	failed := DomainResult{Endpoint: c.DomainChecks["claude"][1], Timeout: true, Error: "deadline", CheckedAt: h.now}
+	r.Domains["claude"] = append(r.Domains["claude"], failed)
+	h.probeFull(r)
+	for _, gr := range h.g.Snapshot(h.now).Groups {
+		if gr.Key == "claude" && (len(gr.Issues) != 1 || gr.Issues[0].Endpoint != failed.Endpoint || !gr.Issues[0].Timeout) {
+			t.Fatalf("wrong culprit: %+v", gr.Issues)
 		}
 	}
-	r = domainReply(h, "203.0.113.10", "192.0.2.99")
-	r.ID = h.g.probeID
-	h.g.HandleProbe(h.now, r)
-	if h.p.frozen[100] || h.p.frozen[101] || !h.p.frozen[200] || !h.p.frozen[201] {
-		t.Fatal("successful parent retry bypassed the child's separate policy")
+}
+
+func TestReplacedProcessTreeCannotUseInflightDomainPermission(t *testing.T) {
+	h := domainHarness(t)
+	good := func() ProbeResult { return domainReply(h, "203.0.113.10", "198.51.100.20") }
+	h.probeFull(good())
+	h.step(DomainInterval)
+	h.p.procs[0].Created = "new instance"
+	h.p.procs[1].Created = "new child"
+	h.step(time.Millisecond)
+	h.probeFull(good())
+	if !h.p.frozen[100] || h.p.frozen[200] {
+		t.Fatal("process replacement reused old proof or affected independent app")
+	}
+	h.step(time.Millisecond)
+	h.probeFull(good())
+	if h.p.frozen[100] {
+		t.Fatal("new verification did not release replacement")
 	}
 }

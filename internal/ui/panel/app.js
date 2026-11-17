@@ -5,6 +5,12 @@
 
 const L = {
   ru: {
+    confirm_title: "Подтвердите разрешение", confirm_accept: "Разрешить", confirm_cancel: "Отмена",
+    confirm_ip: "Будет добавлен только указанный IP или диапазон. Другие адреса не добавляются.",
+    confirm_country: "Будет разрешена указанная страна для IPv4 и IPv6. Другие страны не добавляются.",
+    confirm_rule: "Эти разрешения заменят общие правила для приложения.",
+    confirm_trust: "В этой сети проверки IP, доменов, IPv6 и DNS обходятся после успешного запроса IP. Добавляйте только сеть, в которой намеренно разрешаете прямой выход.",
+    confirm_scope: "Общие разрешения",
     o_ip_unavailable: "Если IP не удалось определить", o_ip_unavailable_d: "Нет связи или не отвечает сервис проверки, включая домены приложения. Продолжение разрешает работу без подтверждения разрешённого выхода.",
     o_ipv6_unavailable: "Если IPv6 не удалось проверить", o_ipv6_unavailable_d: "Например, VPN блокирует IPv6. Проверки продолжатся; полученный запрещённый IPv6 или противоречащие ответы всё равно приостанавливают приложения.",
     failure_suspend: "Приостанавливать", failure_ignore: "Продолжать с предупреждением", warning_running: "работает с предупреждением",
@@ -15,7 +21,8 @@ const L = {
     domain_off: "Проверки доменов выключены. Список сохранён.", domain_app_off: "Проверки начнутся после включения защиты приложения.", domain_required: "Добавьте хотя бы один домен перед включением проверок.",
     domain_unavailable: "Недоступен", domain_v6_disabled: "Проверка выключена", domain_v6_missing: "Не обнаружен", domain_stale: "Результат устарел",
     domain_hint: "По одному домену на строку. Сохранение списка не меняет переключатель. Измеряется соединение Zaslon: свой прокси приложения, другой API-адрес или правила VPN по процессам могут дать иной выход.",
-    domain_unknown: "Выход к сервису не подтверждён", domain_ip: "IP сервиса не разрешён", domain_wait: "Ожидается новая проверка", domain_v6_absent: "нет IPv6 у домена или проверка отключена",
+    settings_changed: "Изменены правила защиты", country_unknown: "Страна выхода IPv4 не определена", country6_unknown: "Страна выхода IPv6 не определена",
+    domain_unknown: "Не удалось проверить внешний IP приложения", domain_ip: "IP сервиса не разрешён", domain_wait: "Ожидается новая проверка", domain_v6_absent: "нет IPv6 у домена или проверка отключена",
     process_error: "ошибка защиты", ipv6_unknown: "Не удалось проверить IPv6",
     overview: "Обзор", apps: "Приложения", allow: "Разрешено", networks: "Сети", stats: "Статистика",
     history: "История", settings: "Настройки", about: "О программе",
@@ -26,7 +33,7 @@ const L = {
     lead_stats: "Сколько раз Zaslon вмешивался за последние 14 дней",
     lead_history: "Последние события",
     lead_settings: "Изменения сохраняются сразу",
-    ip: "Общий внешний IP", ipv6: "IPv6", dns: "DNS", network: "Сеть", none: "нет", offline: "IP не определён", checking: "проверяю…",
+    country_domains: "По доменным проверкам", country_missing: "Страна не определена", ip: "Общий внешний IP", ipv6: "IPv6", dns: "DNS", network: "Сеть", none: "нет", offline: "IP не определён", checking: "проверяю…",
     ipv6_none: "IPv6 нет или он выключен", dns_ok: "идёт через VPN", dns_leak: "идёт мимо VPN", dns_unknown: "не удалось определить",
     trusted_net: "Доверенная сеть", usual_net: "Обычная сеть", unknown_net: "Роутер не виден",
     trust: "Доверять этой сети", allow_ip: "Разрешить этот IP", allow_country: "Разрешить страну", check: "Проверить",
@@ -46,16 +53,22 @@ const L = {
     g_protect: "Защита", g_iface: "Интерфейс", g_system: "Система", g_files: "Файлы и помощь",
     o_ipv6: "Проверять IPv6", o_ipv6_d: "Ловит VPN, которые заворачивают только IPv4",
     o_dns: "Утечка DNS", o_dns_d: "Запросы к сайтам идут мимо VPN", dns_warn: "Предупреждать", dns_block: "Замораживать", dns_off: "Не проверять",
-    o_interval: "Сверять IP раз в", o_interval_d: "Когда всё в порядке", o_agree: "Сервисов должны совпасть", o_agree_d: "Чтобы поверить IP",
+    o_interval: "Интервал проверки общего IP", o_interval_d: "Внешний IP этой сети", o_domain_interval: "Интервал проверки доменов", o_domain_interval_d: "Только для запущенных защищаемых приложений", o_agree: "Сервисов должны совпасть", o_agree_d: "Чтобы поверить IP",
     o_menubar: "Рядом со значком", mb_ip: "Страна и IP", mb_country: "Только страна", mb_icon: "Ничего",
-    o_lang: "Язык", lang_auto: "Как в системе", o_notify: "Уведомления",
+    o_theme: "Тема панели", theme_light: "Светлая", theme_dark: "Тёмная", o_lang: "Язык", lang_auto: "Как в системе", o_notify: "Уведомления",
     o_autostart: "Запускать при входе в систему", o_update: "Проверять обновления", o_update_d: "Раз в сутки, ставятся только по клику",
     open_config: "Открыть config.yaml", open_log: "Открыть журнал", report: "Сообщить о проблеме", sec: "с",
     update_avail: "Доступна версия", update_btn: "Обновить", saved: "Сохранено", about_text: "Kill switch для приложений: замораживает выбранные программы, когда отваливается VPN или меняется IP. Открытый код, без телеметрии.",
-    github: "Zaslon на GitHub", license: "Лицензия MIT",
+    github: "Zaslon на GitHub",
     history_empty: "Пока ничего не случилось", paused_until: "Пауза до", paused_forever: "Пауза до перезапуска",
   },
   en: {
+    confirm_title: "Confirm permission", confirm_accept: "Allow", confirm_cancel: "Cancel",
+    confirm_ip: "Only the listed IP or range will be added. No other addresses are added.",
+    confirm_country: "The listed country will be allowed for IPv4 and IPv6. No other countries are added.",
+    confirm_rule: "These permissions will replace the shared rules for this app.",
+    confirm_trust: "On this network, IP, domain, IPv6 and DNS rules are bypassed after a successful IP request. Add it only if you deliberately permit a direct connection there.",
+    confirm_scope: "Shared permissions",
     o_ip_unavailable: "If the IP check is unavailable", o_ip_unavailable_d: "No connection or a failed checker, including app domains. Continuing permits apps without confirmation of the allowed exit.",
     o_ipv6_unavailable: "If IPv6 cannot be checked", o_ipv6_unavailable_d: "For example, the VPN blocks IPv6. Checks continue; a received disallowed IPv6 or conflicting responses still suspend apps.",
     failure_suspend: "Suspend apps", failure_ignore: "Continue with a warning", warning_running: "running with a warning",
@@ -66,7 +79,8 @@ const L = {
     domain_off: "Domain checks are off. Your list is saved.", domain_app_off: "Checks start when protection is enabled for this app.", domain_required: "Add at least one domain before enabling checks.",
     domain_unavailable: "Unavailable", domain_v6_disabled: "Check disabled", domain_v6_missing: "Not detected", domain_stale: "Result expired",
     domain_hint: "One domain per line. Saving the list does not change the switch. This measures Zaslon's connection: an app's own proxy, another API address or per-process VPN routing may use a different exit.",
-    domain_unknown: "Service exit not confirmed", domain_ip: "Service IP not allowed", domain_wait: "Waiting for a fresh check", domain_v6_absent: "no service IPv6 or check disabled",
+    settings_changed: "Protection settings changed", country_unknown: "IPv4 exit country unknown", country6_unknown: "IPv6 exit country unknown",
+    domain_unknown: "App’s public IP could not be verified", domain_ip: "Service IP not allowed", domain_wait: "Waiting for a fresh check", domain_v6_absent: "no service IPv6 or check disabled",
     process_error: "protection error", ipv6_unknown: "IPv6 check inconclusive",
     overview: "Overview", apps: "Apps", allow: "Allowed", networks: "Networks", stats: "Statistics",
     history: "History", settings: "Settings", about: "About",
@@ -77,7 +91,7 @@ const L = {
     lead_stats: "How often Zaslon stepped in over the last 14 days",
     lead_history: "Recent events",
     lead_settings: "Changes are saved right away",
-    ip: "General public IP", ipv6: "IPv6", dns: "DNS", network: "Network", none: "none", offline: "IP unknown", checking: "checking…",
+    country_domains: "From service checks", country_missing: "Country unknown", ip: "General public IP", ipv6: "IPv6", dns: "DNS", network: "Network", none: "none", offline: "IP unknown", checking: "checking…",
     ipv6_none: "No IPv6, or it's off", dns_ok: "goes through the VPN", dns_leak: "bypasses the VPN", dns_unknown: "couldn't tell",
     trusted_net: "Trusted network", usual_net: "Regular network", unknown_net: "Router not visible",
     trust: "Trust this network", allow_ip: "Allow this IP", allow_country: "Allow country", check: "Check",
@@ -97,13 +111,13 @@ const L = {
     g_protect: "Protection", g_iface: "Interface", g_system: "System", g_files: "Files and help",
     o_ipv6: "Check IPv6", o_ipv6_d: "Catches VPNs that tunnel IPv4 only",
     o_dns: "DNS leaks", o_dns_d: "Lookups bypass the VPN", dns_warn: "Warn", dns_block: "Freeze", dns_off: "Don't check",
-    o_interval: "Check the IP every", o_interval_d: "While all is well", o_agree: "Services must agree", o_agree_d: "To trust an IP",
+    o_interval: "Public IP check interval", o_interval_d: "External IP of this network", o_domain_interval: "Service domain check interval", o_domain_interval_d: "Only for running protected apps", o_agree: "Services must agree", o_agree_d: "To trust an IP",
     o_menubar: "Next to the icon", mb_ip: "Country and IP", mb_country: "Country only", mb_icon: "Nothing",
-    o_lang: "Language", lang_auto: "System", o_notify: "Notifications",
+    o_theme: "Panel theme", theme_light: "Light", theme_dark: "Dark", o_lang: "Language", lang_auto: "System", o_notify: "Notifications",
     o_autostart: "Start at login", o_update: "Check for updates", o_update_d: "Once a day, installed only when you click",
     open_config: "Open config.yaml", open_log: "Open log", report: "Report a problem", sec: "s",
     update_avail: "Version available:", update_btn: "Update", saved: "Saved", about_text: "A kill switch for apps: freezes the apps you choose when the VPN drops or your IP changes. Open source, no telemetry.",
-    github: "Zaslon on GitHub", license: "MIT license",
+    github: "Zaslon on GitHub",
     history_empty: "Nothing has happened yet", paused_until: "Paused until", paused_forever: "Paused until restart",
   },
 };
@@ -134,9 +148,54 @@ let openAppSettings = null;
 let openDomains = null;
 const domainDrafts = new Map();
 let lastJSON = "";
+let deferredJSON = "";
+let refreshID = 0, receivedID = 0;
 const t = (k) => (L[S?.lang] || L.ru)[k] || L.en[k] || k;
 
 async function api(op, data = {}) {
+  return ZaslonPermissions.perform(op, data, S, confirmPermission, send);
+}
+
+function confirmPermission(grant) {
+  const overlay = document.getElementById("permissionConfirm");
+  // Do not replace the text of an earlier, still-pending confirmation.
+  if (!overlay.hidden) return Promise.resolve(false);
+  const cancel = document.getElementById("permissionCancel");
+  const accept = document.getElementById("permissionAccept");
+  const scope = grant.scope || t("confirm_scope");
+  const kind = grant.op === "trust_network" ? "trust" : grant.op === "set_rule" ? "rule" : grant.op === "add_country" ? "country" : "ip";
+  document.getElementById("permissionTitle").textContent = t("confirm_title");
+  document.getElementById("permissionDetail").textContent = t("confirm_" + kind);
+  document.getElementById("permissionValues").textContent = kind === "trust" ? grant.network
+    : [scope, grant.value, ...grant.ips, ...grant.countries].filter(Boolean).join("\n");
+  cancel.textContent = t("confirm_cancel");
+  accept.textContent = t("confirm_accept");
+  overlay.hidden = false;
+  const previous = document.activeElement;
+  return new Promise((resolve) => {
+    const finish = (ok) => {
+      overlay.hidden = true;
+      cancel.onclick = accept.onclick = overlay.onclick = null;
+      document.removeEventListener("keydown", escape);
+      previous?.focus();
+      resolve(ok);
+    };
+    const escape = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); finish(false); }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === cancel ? accept : cancel).focus();
+      }
+    };
+    cancel.onclick = () => finish(false);
+    accept.onclick = () => finish(true);
+    overlay.onclick = (e) => { if (e.target === overlay) finish(false); };
+    document.addEventListener("keydown", escape);
+    cancel.focus();
+  });
+}
+
+async function send(op, data = {}) {
   const r = await fetch("/api/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, ...data }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -184,18 +243,24 @@ function heroActions() {
   return a.join("");
 }
 
-function heroSub() {
-	if (S.status === "error") return (S.errors || []).map(esc).join("<br>");
-  const run = S.apps.filter((a) => a.running).map((a) => esc(a.name));
-  if (S.paused) return S.pausedUntil === "forever" ? t("paused_forever") : `${t("paused_until")} ${esc(S.pausedUntil)}`;
-  const summary = run.length ? `${run.join(", ")} · ${S.status === "frozen" ? t("frozen") : S.status === "blocked" ? t("blocked") : S.status === "warning" ? t("warning_running") : t("running")}` : "";
-  return [summary, ...(S.warnings || []).map((w) => `${(w.apps || []).map(esc).join(", ")}: ${esc(t("warning_" + w.reason))}`)].filter(Boolean).join("<br>");
+function heroSub(state = S) {
+  if (state.status === "error") return (state.errors || []).map(esc).join("<br>");
+  if (state.paused) return state.pausedUntil === "forever" ? t("paused_forever") : `${t("paused_until")} ${esc(state.pausedUntil)}`;
+  const frozen = state.apps.filter((a) => a.frozen > 0).map((a) => esc(a.name));
+  const running = state.apps.filter((a) => a.running && !a.frozen).map((a) => esc(a.name));
+  return [
+    frozen.length && `${frozen.join(", ")} · ${t("frozen")}`,
+    running.length && `${running.join(", ")} · ${t("running")}`,
+    ...(state.warnings || []).map((w) => `${(w.apps || []).map(esc).join(", ")}: ${esc(t("warning_" + w.reason))}`),
+  ].filter(Boolean).join("<br>");
 }
 
+const heroIcon = (status) => ({ ok: "check", warning: "warning", frozen: "snow", starting: "snow", blocked: "stop", error: "stop", paused: "pause" })[status];
+
 function overview() {
-  const icon = { ok: "check", warning: "warning", frozen: "snow", starting: "snow", blocked: "stop", error: "stop", paused: "pause" }[S.status];
   const upd = S.update ? `<div class="banner"><b>${t("update_avail")} ${esc(S.update)}</b><span class="grow"></span><button class="btn primary" data-op="install_update">${t("update_btn")}</button></div>` : "";
   const ipV = S.offline ? t("offline") : S.ip ? esc(S.ip) : t("checking");
+  const ipCountry = S.country ? country(S.country) : S.domainCountry ? country(S.domainCountry) + " · " + t("country_domains") : S.ip ? t("country_missing") : "";
   const others = S.others && S.others.length ? `<div class="s">${t("others")}: ${S.others.map(esc).join(", ")}</div>` : "";
   const dnsTile = S.dns
     ? `<div class="card tile ${S.dnsLeak ? "warn" : ""}"><div class="k">${t("dns")}</div><div class="v">${esc(S.dns)}</div><div class="s">${country(S.dnsCountry)} · ${S.dnsLeak ? t("dns_leak") : t("dns_ok")}</div></div>`
@@ -205,12 +270,12 @@ function overview() {
     : `<div class="card tile"><div class="k">${t("network")}</div><div class="v">${S.netId ? t("usual_net") : t("unknown_net")}</div>${S.netId ? `<div class="s selectable">${t("router")} ${esc(S.netId)}</div><div class="row"><button class="btn small" data-go="networks">${t("trust")}…</button></div>` : ""}</div>`;
   return `${upd}
   <div class="card hero ${S.status}">
-    <div class="orb">${svg(icon)}</div>
+    <div class="orb">${svg(heroIcon(S.status))}</div>
     <div><div class="title">${esc(S.statusText)}</div><div class="sub">${heroSub()}</div></div>
     <div class="actions">${heroActions()}</div>
   </div>
   <div class="grid">
-    <div class="card tile"><div class="k">${t("ip")}</div><div class="v selectable">${ipV}</div><div class="s">${country(S.country)}</div>${others}</div>
+    <div class="card tile"><div class="k">${t("ip")}</div><div class="v selectable">${ipV}</div><div class="s">${ipCountry}</div>${others}</div>
     <div class="card tile ${S.reason === "v6" || S.ipv6Unknown || S.ipv6Conflicting ? "warn" : ""}"><div class="k">${t("ipv6")}</div><div class="v selectable">${S.ip6 ? esc(S.ip6) : "-"}</div><div class="s">${S.ipv6Conflicting ? t("v6conflict") : S.ip6 ? country(S.country6) : S.ipv6Unknown ? t("ipv6_unknown") : t("ipv6_none")}</div></div>
     ${dnsTile}
     ${netTile}
@@ -243,15 +308,19 @@ function avatarStyle(name) {
 }
 
 function appRow(a) {
-  const st = !a.running ? `<span class="badge">${t("not_running")}</span>`
-    : `<span class="badge ${esc(a.status)}">${a.status === "error" ? t("process_error") : a.status === "frozen" ? t("frozen") : a.status === "blocked" ? t("blocked") : a.status === "warning" ? t("warning_running") : t("running")}</span>`;
+  const status = a.status === "error" ? "error" : a.frozen > 0 ? "frozen" : a.status === "warning" ? "warning" : "ok";
+  const st = !a.running && !a.frozen ? `<span class="badge">${t("not_running")}</span>`
+    : `<span class="badge ${status}">${t(status === "error" ? "process_error" : status === "warning" ? "warning_running" : status)}</span>`;
   const expanded = openAppSettings === a.id;
   const settingsButton = `<button class="btn small" id="app-settings-button-${encodeURIComponent(a.id)}" data-app-settings="${esc(a.id)}" aria-expanded="${expanded}" aria-controls="app-settings-${encodeURIComponent(a.id)}" aria-label="${esc(t("settings") + ": " + a.name)}">${t("settings")} <span aria-hidden="true">${expanded ? "▴" : "▾"}</span></button>`;
   const toggle = a.custom
     ? `<button class="btn small danger" data-op="remove_custom" data-app="${esc(a.id)}">${t("remove")}</button>`
     : `<label class="switch"><input type="checkbox" data-toggle="${esc(a.id)}" ${a.enabled ? "checked" : ""}><span></span></label>`;
   const meta = a.custom ? esc((a.match || []).join(", ")) : (a.enabled ? st : "");
-  return `<div class="item"><div class="avatar" style="${avatarStyle(a.name)}">${esc(a.name[0])}</div>
+  const avatar = a.custom
+    ? `<div class="avatar" aria-hidden="true" style="${avatarStyle(a.name)}">${esc(a.name[0])}</div>`
+    : `<div class="avatar"><img class="app-logo" src="icons/apps/${encodeURIComponent(a.id)}.svg" alt=""></div>`;
+  return `<div class="item">${avatar}
     <div><div class="name">${esc(a.name)}</div><div class="meta">${meta}</div></div>
     <div class="end">${a.custom ? st : ""}${settingsButton}${toggle}</div></div>
     ${expanded ? appSettings(a) : ""}`;
@@ -298,7 +367,7 @@ function domainResults(a) {
     if (!ip) return `<span class="measurement-muted">${v6 ? t("domain_v6_missing") : "—"}</span>`;
     return `<code class="selectable">${esc(ip)}</code>${cc ? `<span class="measurement-country">${esc(cc)}</span>` : ""}`;
   };
-  return `${["domain_unknown", "domain_ip", "parent_policy"].includes(a.reason) ? `<div class="hint">${t(a.reason)}</div>` : ""}
+  return `${a.domainIssue ? `<div class="hint">${esc(a.domainIssue)}</div>` : ["domain_unknown", "domain_ip", "parent_policy", "settings_changed", "country_unknown", "country6_unknown"].includes(a.reason) ? `<div class="hint">${t(a.reason)}</div>` : ""}
     <div class="domain-table-wrap" tabindex="0" role="region" aria-label="${esc(t("domain_title") + ": " + a.name)}"><table class="domain-table">
     <colgroup><col class="domain-col-host"><col class="domain-col-ip"><col class="domain-col-ip"><col class="domain-col-time"></colgroup>
     <thead><tr><th scope="col">${t("domain_host")}</th><th scope="col">IPv4</th><th scope="col">IPv6</th><th scope="col">${t("domain_checked")}</th></tr></thead><tbody>
@@ -390,7 +459,7 @@ function toggleSet(key, title, desc, value) {
   return `<div class="set"><div class="txt"><b>${title}</b>${desc ? `<span>${desc}</span>` : ""}</div><label class="switch"><input type="checkbox" data-set="${key}" ${value ? "checked" : ""}><span></span></label></div>`;
 }
 function numSet(key, title, desc, value, unit = t("sec")) {
-  return `<div class="set"><div class="txt"><b>${title}</b><span>${desc}</span></div><div class="field"><input type="number" min="0" data-num="${key}" value="${value}"> ${unit}</div></div>`;
+  return `<div class="set"><div class="txt"><b>${title}</b><span>${desc}</span></div><div class="field"><input type="number" min="${key === "min_agree" ? 1 : 3}" data-num="${key}" value="${value}"> ${unit}</div></div>`;
 }
 function selSet(key, title, desc, value, opts) {
   return `<div class="set"><div class="txt"><b>${title}</b>${desc ? `<span>${desc}</span>` : ""}</div><div class="field"><select data-sel="${key}">${opts.map(([v, l]) => `<option value="${v}" ${v === value ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>`;
@@ -404,10 +473,12 @@ function settings() {
     ${selSet("ipv6_unavailable_action", t("o_ipv6_unavailable"), t("o_ipv6_unavailable_d"), s.ipv6_unavailable_action, [["suspend", t("failure_suspend")], ["ignore", t("failure_ignore")]])}
     ${selSet("dns_check", t("o_dns"), t("o_dns_d"), s.dns_check, [["warn", t("dns_warn")], ["block", t("dns_block")], ["off", t("dns_off")]])}
     ${numSet("check_interval", t("o_interval"), t("o_interval_d"), s.check_interval)}
+    ${numSet("domain_check_interval", t("o_domain_interval"), t("o_domain_interval_d"), s.domain_check_interval)}
     ${numSet("min_agree", t("o_agree"), t("o_agree_d"), s.min_agree, "")}
   </div>
   <h2>${t("g_iface")}</h2><div class="card">
     ${selSet("menubar", t("o_menubar"), "", s.menubar, [["ip", t("mb_ip")], ["country", t("mb_country")], ["icon", t("mb_icon")]])}
+    ${selSet("theme", t("o_theme"), "", s.theme, [["auto", t("lang_auto")], ["light", t("theme_light")], ["dark", t("theme_dark")]])}
     ${selSet("language", t("o_lang"), "", s.language, [["auto", t("lang_auto")], ["ru", "Русский"], ["en", "English"]])}
     ${toggleSet("notifications", t("o_notify"), "", s.notifications)}
   </div>
@@ -425,17 +496,16 @@ function settings() {
 function about() {
   return `<div class="card about"><img src="icon.png" alt=""><div class="big">Zaslon ${esc(S.version)}</div>
     <p>${t("about_text")}</p>
-    <div class="links"><button class="btn" data-url="https://github.com/avazar/zaslon">${t("github")}</button><button class="btn" data-url="https://github.com/avazar/zaslon/blob/dev/LICENSE">${t("license")}</button></div>
-    <p style="font-size:12px">${t("license")} · ef1m03</p></div>`;
+    <div class="links"><button class="btn" data-url="https://github.com/avazar/zaslon">${t("github")}</button><button class="btn" data-url="https://github.com/avazar/zaslon/blob/dev/LICENSE">MIT License</button></div></div>`;
 }
 
 const RENDER = { overview, apps, allow, networks, stats, history, settings, about };
 
-function nav() {
-  const bad = S.status === "frozen" || S.status === "blocked" || S.status === "error" || S.status === "warning";
+function nav(state = S) {
+  const bad = ["frozen", "blocked", "error", "warning"].includes(state.status);
   document.getElementById("nav").innerHTML = PAGES.map((p) =>
-    `<a href="#${p}" class="${p === page ? "on" : ""}">${svg(p)}<span>${t(p)}</span>${p === "overview" && bad ? `<span class="badge ${S.status}">!</span>` : ""}</a>`).join("");
-  document.getElementById("ver").textContent = S.version;
+    `<button type="button" data-go="${p}"${p === page ? ' class="on" aria-current="page"' : ""}>${svg(p)}<span>${t(p)}</span>${p === "overview" && bad ? `<span class="badge ${state.status}">!</span>` : ""}</button>`).join("");
+  document.getElementById("ver").textContent = state.version;
 }
 
 function render() {
@@ -443,6 +513,7 @@ function render() {
   document.documentElement.lang = S.lang;
   nav();
   const main = document.getElementById("main");
+  main.dataset.page = page;
   const keep = main.scrollTop;
   main.innerHTML = `<div class="page"><h1>${t(page)}</h1><p class="lead">${t("lead_" + page) === "lead_" + page ? "" : t("lead_" + page)}</p>${RENDER[page]()}</div>`;
   main.scrollTop = keep;
@@ -450,16 +521,35 @@ function render() {
 
 // Re-render on changes, but never under the user's fingers.
 async function refresh(force = false) {
+  const id = ++refreshID;
   try {
     const r = await fetch("/api/state");
     if (!r.ok) return;
     const txt = await r.text();
-    if (!force && txt === lastJSON) return;
-    lastJSON = txt;
-    S = JSON.parse(txt);
+    if (id < receivedID) return;
+    receivedID = id;
+    if (!force && !deferredJSON && txt === lastJSON) return;
+    const state = JSON.parse(txt);
+    const theme = state.settings?.theme;
+    document.getElementById("dark-theme").media = theme === "dark" ? "all" : theme === "light" ? "not all" : "(prefers-color-scheme: dark)";
     const a = document.activeElement;
-    if (!force && a && a.closest("main") && ["INPUT", "SELECT", "TEXTAREA"].includes(a.tagName)) return;
+    if (!force && a?.closest("main") && ["INPUT", "SELECT", "TEXTAREA"].includes(a.tagName)) {
+      if (txt === deferredJSON) return;
+      nav(state);
+      const hero = page === "overview" && document.querySelector("main .hero");
+      if (hero) {
+        hero.className = `card hero ${state.status}`;
+        hero.querySelector(".orb").innerHTML = svg(heroIcon(state.status));
+        hero.querySelector(".title").textContent = state.statusText;
+        hero.querySelector(".sub").innerHTML = heroSub(state);
+      }
+      deferredJSON = txt;
+      return;
+    }
+    S = state;
     render();
+    lastJSON = txt;
+    deferredJSON = "";
   } catch (_) { /* Zaslon restarting: try again on the next tick */ }
 }
 
@@ -580,8 +670,8 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("hashchange", () => { page = location.hash.slice(1); openAppSettings = null; openDomains = null; render(); });
 
 (async () => {
+  setInterval(refresh, 1000);
   await refresh(true);
   countries = await fetch("/api/countries").then((r) => r.json()).catch(() => []);
-  if (page === "allow" || page === "apps") render();
-  setInterval(refresh, 1000);
+  if (S && (page === "allow" || page === "apps")) render();
 })();

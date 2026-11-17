@@ -52,7 +52,7 @@ func restartRecorded(t *testing.T, h *harness, p *suspensionCounts, dir string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.g = New(cfg, Deps{Procs: ledger, Fingerprint: func() string { return h.fp }, NetworkVersion: func() uint64 { return h.revision }, Self: 999, StartProbe: func(_ *config.Config, _ uint64, _ bool) func() { h.probes++; return func() {} }})
+	h.g = New(cfg, Deps{Procs: ledger, Fingerprint: func() string { return h.fp }, NetworkVersion: func() uint64 { return h.revision }, Self: 999, StartProbe: func(_ *config.Config, _ uint64, _ ProbePlan) func() { h.probes++; return func() {} }})
 }
 
 func TestRestoreProtectionNeverResumesOrAddsSuspensionBeforeProof(t *testing.T) {
@@ -94,6 +94,19 @@ func TestRestoreProtectionNeverResumesOrAddsSuspensionBeforeProof(t *testing.T) 
 	h.probeFull(r)
 	if p.frozen[100] {
 		t.Fatal("recovery permanently changed explicit ignore policy")
+	}
+}
+
+func TestRestorePlansFormerControlReleaseWithoutResumingUserApps(t *testing.T) {
+	h, p, _ := recordedHarness(t)
+	p.procs[0].Control = true
+	n, err := h.g.RestoreProtection()
+	if err != nil || n != 3 || p.resumes != 0 {
+		t.Fatalf("control planning changed suspension state: adopted=%d resumes=%d error=%v", n, p.resumes, err)
+	}
+	h.step(0)
+	if p.counts[100] != 0 || p.counts[101] != 1 || p.counts[200] != 1 || p.counts[201] != 1 {
+		t.Fatalf("released user traffic with the control process: %v", p.counts)
 	}
 }
 
@@ -266,8 +279,11 @@ func TestRestoreProtectionTimeoutRemainsRequiredWithIgnorePolicy(t *testing.T) {
 	}
 	h.step(0)
 	id := h.g.probeID
-	h.probeFull(timedOutReply(h, false))
-	if !h.g.probing || h.g.probeID != id+1 || p.resumes != 2 || !p.frozen[100] || !p.frozen[101] {
+	r := timedOutReply(h, false)
+	r.ID = id
+	retry := timeoutDecision(h, r, false)
+	h.probeFull(r)
+	if !retry || p.resumes != 2 || !p.frozen[100] || !p.frozen[101] {
 		t.Fatal("required first-proof timeout did not retain holds and request its bounded retry")
 	}
 }

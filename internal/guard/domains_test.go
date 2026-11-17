@@ -11,6 +11,9 @@ import (
 	"github.com/avazar/zaslon/internal/recovery"
 )
 
+const DomainInterval = 15 * time.Second
+const DomainMaxAge = 2 * DomainInterval
+
 const claudeEndpoint = "https://claude.example/cdn-cgi/trace"
 const cursorEndpoint = "https://cursor.example/cdn-cgi/trace"
 
@@ -95,8 +98,8 @@ func TestDomainCadenceAndCacheInvalidation(t *testing.T) {
 	h := domainHarness(t)
 	h.probeFull(domainReply(h, "203.0.113.10", "198.51.100.20"))
 	var requested []bool
-	h.g.d.StartProbe = func(_ *config.Config, _ uint64, domains bool) func() {
-		requested = append(requested, domains)
+	h.g.d.StartProbe = func(_ *config.Config, _ uint64, plan ProbePlan) func() {
+		requested = append(requested, len(plan.Apps) != 0)
 		return func() { h.cancelled++ }
 	}
 	h.step(5 * time.Second)

@@ -60,7 +60,7 @@ func newRunnerLoopFixture(t *testing.T) *runnerLoopFixture {
 	f.cfg.CheckIPv6 = false
 	ctx, cancel := context.WithCancel(context.Background())
 	f.r = &Runner{ctx: ctx, results: make(chan guard.ProbeResult, 4), changes: &netwatch.Events{C: make(chan struct{})}}
-	f.r.G = guard.New(f.cfg, guard.Deps{Procs: f.p, Fingerprint: func() string { f.steps <- struct{}{}; return "unchanged" }, StartProbe: func(_ *config.Config, id uint64, _ bool) func() {
+	f.r.G = guard.New(f.cfg, guard.Deps{Procs: f.p, Fingerprint: func() string { f.steps <- struct{}{}; return "unchanged" }, StartProbe: func(_ *config.Config, id uint64, _ guard.ProbePlan) func() {
 		f.probeCount.Add(1)
 		f.probes <- id
 		return func() {}
@@ -137,11 +137,11 @@ func TestDelayedTickDoesNotRefreezeFreshDomainResult(t *testing.T) {
 		}
 	}
 	// The processing-time fix must not turn off genuine expiry.
-	f.elapsed.Store(int64(guard.DomainMaxAge + time.Second))
+	f.elapsed.Store(int64(2*f.cfg.DomainCheckInterval.D() + time.Second))
 	f.drainSteps()
 	f.ticks <- f.base.Add(time.Second)
 	loopReceive(t, f.steps)
-	s = f.r.G.Snapshot(f.base.Add(guard.DomainMaxAge + time.Second))
+	s = f.r.G.Snapshot(f.base.Add(2*f.cfg.DomainCheckInterval.D() + time.Second))
 	if !f.p.held.Load() || s.Status != guard.Suspect {
 		t.Fatal("genuinely expired proof was allowed")
 	}
@@ -169,5 +169,23 @@ func TestDelayedConfigPollDoesNotStartAnAlreadyExpiredProbe(t *testing.T) {
 	f.success(t, newID, 10200*time.Millisecond)
 	if f.p.held.Load() {
 		t.Fatal("current settings probe did not resume the fixture")
+	}
+}
+
+func TestQueuedResultAfterInterruptionCannotResumeBeforeTick(t *testing.T) {
+	f := newRunnerLoopFixture(t)
+	oldID := loopReceive(t, f.probes)
+	f.elapsed.Store(int64(5 * time.Second)) // still below MaxProbeAge
+	f.r.results <- guard.ProbeResult{ID: oldID, Domains: map[string][]guard.DomainResult{
+		"fixture": {{Endpoint: f.cfg.DomainChecks["fixture"][0], IP: "203.0.113.10", CheckedAt: f.base}},
+	}}
+	newID := loopReceive(t, f.probes)
+	if newID == oldID || !f.p.held.Load() || f.p.resumes.Load() != 0 {
+		t.Fatal("queued pre-interruption success resumed before fresh proof")
+	}
+	f.elapsed.Store(int64(6 * time.Second))
+	f.success(t, newID, 5500*time.Millisecond)
+	if f.p.held.Load() {
+		t.Fatal("fresh post-interruption proof did not resume")
 	}
 }

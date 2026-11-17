@@ -14,14 +14,16 @@ import (
 type cached struct {
 	start      int64
 	path, args string
+	control    controlRole
 }
 
 type osController struct {
 	mu    sync.Mutex
 	cache map[int]cached // pid -> exec path; keyed with start time so a reused pid is re-read
+	own   string
 }
 
-func New() Controller { return &osController{cache: map[int]cached{}} }
+func New() Controller { return &osController{cache: map[int]cached{}, own: executablePath()} }
 
 func (c *osController) List() ([]Proc, error) {
 	kps, err := unix.SysctlKinfoProcSlice("kern.proc.all")
@@ -43,8 +45,14 @@ func (c *osController) List() ([]Proc, error) {
 		ce, ok := c.cache[pid]
 		if !ok || ce.start != start {
 			// procargs2 is readable for our own user's processes, which is what we protect.
-			path, args := procArgs(pid)
-			ce = cached{start: start, path: path, args: args}
+			path, argv := procArguments(pid)
+			ce = cached{start: start, path: path, args: joinArgs(argv), control: ownRole(path, c.own, argv)}
+			c.cache[pid] = ce
+		}
+		if ce.control != notControl {
+			// An exec can retain PID and birth: do not exempt a replacement image.
+			path, argv := procArguments(pid)
+			ce.path, ce.args, ce.control = path, joinArgs(argv), ownRole(path, c.own, argv)
 			c.cache[pid] = ce
 		}
 		name := filepath.Base(ce.path)
@@ -52,6 +60,7 @@ func (c *osController) List() ([]Proc, error) {
 			name = unix.ByteSliceToString(kp.Proc.P_comm[:])
 		}
 		p := Proc{PID: pid, Created: strconv.FormatInt(start, 10), PPID: int(kp.Eproc.Ppid), Name: name, Path: ce.path}
+		p.control, p.Control = ce.control, ce.control != notControl
 		if isInterpreter(name) {
 			p.Args = ce.args
 		}
@@ -60,6 +69,23 @@ func (c *osController) List() ([]Proc, error) {
 	for pid := range c.cache {
 		if !seen[pid] {
 			delete(c.cache, pid)
+		}
+	}
+	parents := make(map[int]Proc, len(out))
+	for _, p := range out {
+		parents[p.PID] = p
+	}
+	for i, p := range out {
+		parent := parents[p.PPID]
+		if !darwinProbePath(p.Path) || parent.control != guardControl || !parent.Control {
+			continue
+		}
+		// Read the actual image/argv again: exec can preserve PID and birth.
+		path, argv := procArguments(p.PID)
+		if darwinProbeHelper(parent, p, path, argv) {
+			if birth, err := processIdentity(p.PID); err == nil && birth == p.Created {
+				out[i].Control = true
+			}
 		}
 	}
 	return out, nil
@@ -83,22 +109,26 @@ func processState(pid int) (string, bool, error) {
 
 // procArgs reads kern.procargs2: argc (int32), exec path, NUL padding, argv..., env...
 func procArgs(pid int) (path, args string) {
+	path, argv := procArguments(pid)
+	return path, joinArgs(argv)
+}
+
+func procArguments(pid int) (path string, argv []string) {
 	buf, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil || len(buf) < 4 {
-		return "", ""
+		return "", nil
 	}
 	argc := int(binary.LittleEndian.Uint32(buf[:4]))
 	rest := buf[4:]
 	i := bytes.IndexByte(rest, 0)
 	if i < 0 {
-		return "", ""
+		return "", nil
 	}
 	path = string(rest[:i])
 	rest = rest[i:]
 	for len(rest) > 0 && rest[0] == 0 {
 		rest = rest[1:]
 	}
-	var argv []string
 	for n := 0; n < argc && len(rest) > 0; n++ {
 		j := bytes.IndexByte(rest, 0)
 		if j < 0 {
@@ -110,7 +140,7 @@ func procArgs(pid int) (path, args string) {
 		}
 		rest = rest[j+1:]
 	}
-	return path, joinArgs(argv)
+	return path, argv
 }
 
 func joinArgs(argv []string) string {

@@ -133,6 +133,7 @@ func windowsChange(source string, row unsafe.Pointer, kind uint32) Change {
 // AF_UNSPEC subscribes to IPv4 and IPv6. No adapters, addresses or routes are
 // modified. Cancellation runs outside the callback to avoid an API deadlock.
 func watch(ctx context.Context, notify, ignored func(func() Change), fail func(error)) (string, func() string) {
+	watchPower(ctx, notify, fail)
 	if err := cancelChange.Find(); err != nil {
 		fail(err)
 		return "Network notification filter disabled: notification API unavailable", nil
@@ -179,13 +180,20 @@ func watch(ctx context.Context, notify, ignored func(func() Change), fail func(e
 		}
 		return fmt.Sprintf("Network notification filter: local-only Teredo IPv6; candidates=%d", filter.count())
 	}
+	initialStatus := status(err)
+	lastStatus := initialStatus
 	refresh := func() string {
 		if ctx.Err() != nil || !filter.beginRefresh() {
 			return ""
 		}
 		candidates, err := localTeredoInterfaces()
 		filter.initialize(candidates, err)
-		return status(err)
+		note := status(err)
+		if note == lastStatus {
+			return ""
+		}
+		lastStatus = note
+		return note
 	}
-	return status(err), refresh
+	return initialStatus, refresh
 }

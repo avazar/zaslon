@@ -5,12 +5,14 @@ import (
 	"time"
 
 	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/procs"
 )
 
-const DomainInterval = 15 * time.Second
-
-// Allow the next bounded measurement to complete without routine micro-pauses.
-const DomainMaxAge = 2 * DomainInterval
+// Allow one bounded measurement to finish after the next scheduled start.
+func (g *Guard) domainMaxAge() time.Duration {
+	interval := g.cfg.DomainCheckInterval.D()
+	return max(interval, interval+MaxProbeAge)
+}
 
 type DomainResult struct {
 	Endpoint    string    `json:"endpoint"`
@@ -25,61 +27,114 @@ type DomainResult struct {
 	CheckedAt   time.Time `json:"checkedAt"`
 }
 
-// One immediate retry per uninterrupted hold. Preserve the failed evidence
-// while it runs; only HandleProbe may replace it with a current result.
-func (g *Guard) retryTimedOutDomains(now time.Time) {
-	if g.paused(now) {
-		return
+type domainFamily struct {
+	endpoint string
+	v6       bool
+}
+
+// The shared worker requests permission after publishing the timeout.
+// Only a held policy can trigger a retry, once per endpoint/family until recovery.
+func (g *Guard) retryDomainFamily(now time.Time, r ProbeResult) bool {
+	d := r.Sample
+	key := domainFamily{d.Endpoint, r.SampleIPv6}
+	if g.paused(now) || g.retried[key] || !g.currentSample(now, d) || !(d.Timeout && !key.v6 || d.IPv6Timeout && key.v6) {
+		return false
 	}
 	var apps []string
 	for _, gr := range g.groups {
-		if !g.cfg.DomainCheckEnabled(gr.key) {
+		if !g.plan.Apps[gr.key] || !slices.Contains(g.cfg.DomainChecks[gr.key], d.Endpoint) {
 			continue
 		}
-		a := g.assess(gr, now)
-		if gr.status == OK && a.reason == NoReason && len(a.ignored) == 0 {
-			gr.timeoutRetried = false
+		if g.earlyDenials[gr.key].reason == NoReason {
 			continue
 		}
-		if gr.timeoutRetried || (a.reason != DomainUnconfirmed && a.reason != IPv6Unconfirmed) || !g.domainTimedOut(gr, now) {
+		action := g.cfg.IPUnavailableAction
+		if key.v6 {
+			action = g.cfg.IPv6UnavailableAction
+		}
+		if !gr.recovering && action == config.IgnoreFailure {
 			continue
 		}
-		held := false
-		for _, owner := range g.groups {
-			for _, p := range owner.frozen {
-				if p.AppID == gr.key || slices.Contains(p.PolicyIDs, gr.key) {
-					held = true
-				}
-			}
-		}
-		if !held {
+		if slices.ContainsFunc(g.cfg.DomainChecks[gr.key], func(ep string) bool {
+			return g.knownServiceDenial(gr.key, ep, g.allowFor(gr)) != NoReason
+		}) {
 			continue
 		}
-		gr.timeoutRetried = true
-		apps = append(apps, gr.names()...)
+		why := g.verdict(gr, now)
+		if why != DomainUnconfirmed && why != IPv6Unconfirmed {
+			continue
+		}
+		if g.hasFrozenPolicy(gr.key) {
+			apps = append(apps, gr.names()...)
+		}
 	}
 	if len(apps) == 0 {
-		return
+		return false
 	}
-	g.nextDomainCheck = now
-	g.nextCheck = now
-	g.emit(now, Event{Kind: EvDomainCheck, Apps: apps, Details: []string{"retry=immediate after domain timeout; processes remain suspended"}})
-	g.startProbe(now) // enforcement and original failure diagnostics have finished
+	if g.retried == nil {
+		g.retried = make(map[domainFamily]bool)
+	}
+	g.retried[key] = true
+	family := "IPv4"
+	if key.v6 {
+		family = "IPv6"
+	}
+	g.emit(now, Event{Kind: EvDomainCheck, Apps: apps, Domain: d.Endpoint, Details: []string{"retry=immediate after domain timeout", d.Endpoint + " " + family}})
+	return true
 }
 
-func (g *Guard) domainTimedOut(gr *group, now time.Time) bool {
-	for _, d := range g.domains[gr.key] {
-		if !slices.Contains(g.cfg.DomainChecks[gr.key], d.Endpoint) || d.CheckedAt.IsZero() || d.CheckedAt.Before(g.domainStarted) || d.CheckedAt.After(now) || now.Sub(d.CheckedAt) >= DomainMaxAge {
-			continue
-		}
-		if d.Error != "" && d.Timeout && (gr.recovering || g.cfg.IPUnavailableAction != config.IgnoreFailure) {
-			return true
-		}
-		if g.cfg.CheckIPv6 && d.IPv6Error != "" && d.IPv6Timeout && (gr.recovering || g.cfg.IPv6UnavailableAction != config.IgnoreFailure) {
-			return true
+func (g *Guard) hasFrozenPolicy(id string) bool {
+	for _, owner := range g.groups {
+		for _, p := range owner.frozen {
+			if p.AppID == id || slices.Contains(p.PolicyIDs, id) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// Include inherited policies of surviving descendants. An app that leaves the
+// process tree loses both its cached permission and its pending measurement.
+func (g *Guard) updateActiveDomains(remembered map[int]procs.Proc) {
+	active := make(map[string]bool)
+	for _, owner := range g.groups {
+		for _, p := range owner.running {
+			if g.cfg.DomainCheckEnabled(p.AppID) {
+				active[p.AppID] = true
+			}
+			for _, id := range p.PolicyIDs {
+				if g.cfg.DomainCheckEnabled(id) {
+					active[id] = true
+				}
+			}
+		}
+	}
+	continuing := make(map[string]bool)
+	for _, p := range remembered {
+		continuing[p.AppID] = true
+		for _, id := range p.PolicyIDs {
+			continuing[id] = true
+		}
+	}
+	for id := range g.activeDomains {
+		if !active[id] || !continuing[id] {
+			delete(g.domains, id)
+			delete(g.plan.Apps, id)
+			delete(g.readyGroups, id)
+			delete(g.earlyDenials, id)
+		}
+	}
+	for id := range active {
+		if !g.activeDomains[id] || !continuing[id] {
+			if g.awaitingApps == nil {
+				g.awaitingApps = make(map[string]bool)
+			}
+			g.awaitingApps[id] = true
+			g.nextDomainCheck = time.Time{}
+		}
+	}
+	g.activeDomains = active
 }
 
 func cloneDomains(in map[string][]DomainResult) map[string][]DomainResult {
@@ -91,12 +146,7 @@ func cloneDomains(in map[string][]DomainResult) map[string][]DomainResult {
 }
 
 func (g *Guard) domainsDue(now time.Time) bool {
-	for _, gr := range g.groups {
-		if g.cfg.DomainCheckEnabled(gr.key) && (g.nextDomainCheck.IsZero() || !now.Before(g.nextDomainCheck)) {
-			return true
-		}
-	}
-	return false
+	return len(g.activeDomains) > 0 && !now.Before(g.nextDomainCheck)
 }
 
 func (g *Guard) hasDomainTargets() bool {
@@ -137,40 +187,88 @@ func (g *Guard) assessDomains(gr *group, now time.Time, allow config.Allow) asse
 	}
 	var unavailable []Reason
 	for _, endpoint := range expected {
-		d, ok := seen[endpoint]
-		if !ok || d.CheckedAt.IsZero() || d.CheckedAt.Before(g.domainStarted) || d.CheckedAt.After(now) || now.Sub(d.CheckedAt) >= DomainMaxAge {
-			unavailable = append(unavailable, DomainUnconfirmed)
-			if g.cfg.CheckIPv6 && g.ipv6Possible {
-				unavailable = append(unavailable, IPv6Unconfirmed)
-			}
-			continue
+		reason, missing := g.assessEndpoint(gr, endpoint, seen[endpoint], now, allow)
+		if reason != NoReason {
+			return assessment{reason: reason}
 		}
-		if d.Error != "" || d.IP == "" {
-			unavailable = append(unavailable, DomainUnconfirmed)
-		} else if !allow.Matches(d.IP, d.Country) {
-			return assessment{reason: DomainIPNotAllowed}
-		}
-		if g.cfg.CheckIPv6 {
-			if d.IPv6Error != "" {
-				unavailable = append(unavailable, IPv6Unconfirmed)
-			}
-			if d.IP6 != "" && !allow.Matches(d.IP6, d.Country6) {
-				return assessment{reason: DomainIPNotAllowed}
-			}
-		}
-		if g.cfg.DNSCheck == "block" && g.dnsCC != "" && d.Country != "" && g.dnsCC != d.Country {
-			allowed := false
-			for _, cc := range allow.Countries {
-				if cc == g.dnsCC {
-					allowed = true
-				}
-			}
-			if !allowed {
-				return assessment{reason: DNSLeak}
-			}
-		}
+		unavailable = append(unavailable, missing...)
+
 	}
 	return g.assessUnavailable(unavailable)
+}
+
+func (g *Guard) assessEndpoint(gr *group, endpoint string, d DomainResult, now time.Time, allow config.Allow) (Reason, []Reason) {
+	var unavailable []Reason
+	if why := g.knownServiceDenial(gr.key, endpoint, allow); why != NoReason {
+		return why, nil
+	}
+	if d.CheckedAt.IsZero() || d.CheckedAt.Before(g.domainStarted) || d.CheckedAt.After(now) || now.Sub(d.CheckedAt) >= g.domainMaxAge() {
+		unavailable = append(unavailable, DomainUnconfirmed)
+		if g.cfg.CheckIPv6 && g.ipv6Possible {
+			unavailable = append(unavailable, IPv6Unconfirmed)
+		}
+		return NoReason, unavailable
+	}
+	if d.Error != "" || d.IP == "" {
+		unavailable = append(unavailable, DomainUnconfirmed)
+	} else if why := addressReason(allow, d.IP, d.Country, DomainIPNotAllowed, CountryUnknown); why != NoReason {
+		return why, nil
+	}
+	if g.cfg.CheckIPv6 {
+		if d.IPv6Error != "" {
+			unavailable = append(unavailable, IPv6Unconfirmed)
+		}
+		if why := addressReason(allow, d.IP6, d.Country6, DomainIPNotAllowed, IPv6CountryUnknown); why != NoReason {
+			return why, nil
+		}
+	}
+	if g.cfg.DNSCheck == "block" && g.dnsCC != "" && d.Country != "" && g.dnsCC != d.Country {
+		allowed := false
+		for _, cc := range allow.Countries {
+			if cc == g.dnsCC {
+				allowed = true
+			}
+		}
+		if !allowed {
+			return DNSLeak, nil
+		}
+	}
+	return NoReason, unavailable
+}
+
+// Report only endpoints contributing to this hold, including failures received
+// before the full group completes.
+func (g *Guard) domainIssues(gr *group, now time.Time) []DomainIssue {
+	if !g.activeDomains[gr.key] || gr.reason == NoReason {
+		return nil
+	}
+	hold, early := g.earlyDenials[gr.key]
+	var issues []DomainIssue
+	for _, endpoint := range g.cfg.DomainChecks[gr.key] {
+		var d DomainResult
+		if early && endpoint == hold.sample.Endpoint && hold.reason == gr.reason {
+			d = hold.sample
+		} else {
+			for _, sample := range g.domains[gr.key] {
+				if sample.Endpoint == endpoint {
+					d = sample
+					break
+				}
+			}
+			if early && d.CheckedAt.Before(g.probeStarted) {
+				continue
+			}
+			why, missing := g.assessEndpoint(gr, endpoint, d, now, g.allowFor(gr))
+			if why != gr.reason && !slices.Contains(missing, gr.reason) {
+				continue
+			}
+		}
+		issue := DomainIssue{Endpoint: endpoint, Reason: gr.reason}
+		fresh := !d.CheckedAt.IsZero() && !d.CheckedAt.Before(g.domainStarted) && !d.CheckedAt.After(now) && now.Sub(d.CheckedAt) < g.domainMaxAge()
+		issue.Timeout = fresh && (gr.reason == DomainUnconfirmed && d.Timeout || gr.reason == IPv6Unconfirmed && d.IPv6Timeout)
+		issues = append(issues, issue)
+	}
+	return issues
 }
 
 func (g *Guard) expireDomains(now time.Time) {
@@ -178,8 +276,8 @@ func (g *Guard) expireDomains(now time.Time) {
 		return
 	}
 	for _, gr := range g.groups {
-		if gr.status == OK && g.cfg.DomainCheckEnabled(gr.key) {
-			if why := g.domainVerdict(gr, now, g.allowFor(gr)); why != NoReason && !(g.trusted() && !g.offline && g.ip != "") {
+		if gr.status == OK && g.activeDomains[gr.key] {
+			if why := g.verdict(gr, now); why != NoReason {
 				gr.status, gr.reason, gr.since = Suspect, why, now
 				g.emit(now, Event{Kind: EvDomainCheck, Apps: gr.names(), Details: g.domainDiagnostics(gr, now)})
 			}

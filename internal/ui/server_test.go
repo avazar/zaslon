@@ -28,7 +28,7 @@ func startServer(t *testing.T) (*Server, PanelInfo, *guard.Guard) {
 	cfg := config.Default()
 	cfg.Allow.IPs = []string{"64.137.54.87"}
 	var probeID uint64
-	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "x" }, StartProbe: func(_ *config.Config, id uint64, _ bool) func() { probeID = id; return nil },
+	g := guard.New(cfg, guard.Deps{Fingerprint: func() string { return "x" }, StartProbe: func(_ *config.Config, id uint64, _ guard.ProbePlan) func() { probeID = id; return nil },
 		Procs: noProcs{}, SaveConfig: func(*config.Config) error { return nil }})
 	g.Step(time.Now())
 	g.HandleProbe(time.Now(), guard.ProbeResult{ID: probeID, IP: "64.137.54.87", Country: "NL", Votes: 2})
@@ -44,6 +44,25 @@ func startServer(t *testing.T) (*Server, PanelInfo, *guard.Guard) {
 		t.Fatal(err)
 	}
 	return s, info, g
+}
+
+func TestPanelThemeSetting(t *testing.T) {
+	s, _, g := startServer(t)
+	for _, theme := range []string{"dark", "light", "auto"} {
+		raw, err := json.Marshal(map[string]string{"theme": theme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.apply(action{Op: "settings", Settings: raw}); err != nil {
+			t.Fatal(err)
+		}
+		if got := g.Snapshot(time.Now()).Config.Theme; got != theme {
+			t.Fatalf("theme = %q, want %q", got, theme)
+		}
+	}
+	if err := s.apply(action{Op: "settings", Settings: json.RawMessage(`{"theme":"unknown"}`)}); err == nil {
+		t.Fatal("accepted unknown theme")
+	}
 }
 
 func TestServerAuth(t *testing.T) {

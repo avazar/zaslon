@@ -584,6 +584,11 @@ func scenario(repo string, result *report) (err error) {
 		return err
 	}
 	result.Checks = append(result.Checks, "A and its child run while B and its child freeze; general IP check is unavailable")
+	logPath := filepath.Join(profile, "zaslon.log")
+	beforeSwitch, err := readSharedFile(logPath)
+	if err != nil {
+		return err
+	}
 	modeA.Store(0)
 	modeB.Store(1)
 	if err = waitFor("periodic 15-second check freezes only A", 22*time.Second, func() bool { return held("a", "ac") }); err != nil {
@@ -593,12 +598,28 @@ func scenario(repo string, result *report) (err error) {
 		return err
 	}
 	result.Checks = append(result.Checks, "the periodic 15-second check reverses decisions without a settings or network change")
-	modeA.Store(1)
-	modeB.Store(2)
-	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
+	if err = waitFor("persistent suspension and release for the two process trees", 3*time.Second, func() bool {
+		data, readErr := readSharedFile(logPath)
+		if readErr != nil || len(data) < len(beforeSwitch) {
+			return false
+		}
+		freezeA, resumeB := false, false
+		for _, line := range strings.Split(string(data[len(beforeSwitch):]), "\n") {
+			if strings.Contains(line, "Frozen (") && strings.Contains(line, "): fixture-a | ") && strings.Contains(line, "processes=2") {
+				freezeA = true
+			}
+			if strings.Contains(line, "Resumed: fixture-b | processes=2") {
+				resumeB = true
+			}
+		}
+		return freezeA && resumeB
+	}); err != nil {
 		return err
 	}
-	if err = waitFor("B held on HTTP 403", 8*time.Second, func() bool { return held("b", "bc") }); err != nil {
+	result.Checks = append(result.Checks, "the ready EXE logs successful suspension and release of both real fixture processes in each tree")
+	modeA.Store(1)
+	modeB.Store(2)
+	if err = waitFor("B held on HTTP 403", cfg.DomainCheckInterval.D()+7*time.Second, func() bool { return held("b", "bc") }); err != nil {
 		return err
 	}
 	if err = checkBeats([]string{"a", "ac", "control"}, []string{"b", "bc"}); err != nil {
@@ -648,6 +669,9 @@ func scenario(repo string, result *report) (err error) {
 	result.Checks = append(result.Checks, "successful immediate domain retry resumes the same app and child before the normal 15-second cadence")
 	// Exercise the explicit failure policy on ready EXEs without any real app.
 	modeB.Store(2)
+	// The default cadence was tested above. Use a shorter supported interval
+	// for the remaining policy and recovery checks.
+	cfg.DomainCheckInterval = config.Duration(3 * time.Second)
 	cfg.IPUnavailableAction = config.IgnoreFailure
 	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
 		return err
@@ -666,9 +690,6 @@ func scenario(repo string, result *report) (err error) {
 	}
 	result.Checks = append(result.Checks, "explicit ignore policy resumes an unavailable service and reports warning status")
 	modeA.Store(0)
-	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
-		return err
-	}
 	if err = waitFor("known bad exit remains denied with ignore enabled", 8*time.Second, func() bool { return held("a", "ac") }); err != nil {
 		return err
 	}
@@ -676,6 +697,35 @@ func scenario(repo string, result *report) (err error) {
 		return err
 	}
 	result.Checks = append(result.Checks, "ignore never permits a received disallowed service IP")
+	// A later failed request must not erase the known denial, even after a
+	// settings-triggered verification. Only this fixture endpoint is affected.
+	modeA.Store(2)
+	cfg.Allow.IPs = append(cfg.Allow.IPs, "192.0.2.123")
+	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
+		return err
+	}
+	if err = waitFor("A reports HTTP 403 after its known disallowed exit", 8*time.Second, func() bool {
+		data, e := readSharedFile(filepath.Join(profile, "zaslon.log"))
+		if e != nil {
+			return false
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "Service check: fixture-a") && strings.Contains(line, sa.URL+"/cdn-cgi/trace IPv4: HTTP 403") {
+				return true
+			}
+		}
+		return false
+	}); err != nil {
+		return err
+	}
+	if !held("a", "ac") {
+		return errors.New("ignored HTTP 403 erased A's known disallowed exit")
+	}
+	if err = checkBeats([]string{"b", "bc", "control"}, []string{"a", "ac"}); err != nil {
+		return err
+	}
+	result.Checks = append(result.Checks, "a later ignored HTTP 403 cannot erase the prior disallowed exit or release the same app and child")
+	modeA.Store(0)
 	cfg.DomainChecksEnabled["fixture-a"] = false
 	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
 		return err
@@ -689,11 +739,26 @@ func scenario(repo string, result *report) (err error) {
 	if len(cfg.DomainChecks["fixture-a"]) != 1 {
 		return errors.New("domain switch lost the saved list")
 	}
+	beforeReenable, err := readSharedFile(logPath)
+	if err != nil {
+		return err
+	}
 	cfg.DomainChecksEnabled["fixture-a"] = true
 	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
 		return err
 	}
-	if err = waitFor("reenabled domain switch holds the disallowed exit", 8*time.Second, func() bool { return held("a", "ac") }); err != nil {
+	if err = waitFor("reenabled domain switch checks and holds the disallowed exit", 8*time.Second, func() bool {
+		data, readErr := readSharedFile(logPath)
+		if readErr != nil || len(data) < len(beforeReenable) {
+			return false
+		}
+		for _, line := range strings.Split(string(data[len(beforeReenable):]), "\n") {
+			if strings.Contains(line, "Service check: fixture-a") && strings.Contains(line, "exit 192.0.2.99") {
+				return held("a", "ac")
+			}
+		}
+		return false
+	}); err != nil {
 		return err
 	}
 	if err = checkBeats([]string{"b", "bc", "control"}, []string{"a", "ac"}); err != nil {
@@ -754,9 +819,6 @@ func scenario(repo string, result *report) (err error) {
 		return err
 	}
 	modeA.Store(0)
-	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
-		return err
-	}
 	if err = waitFor("orphan and new descendant remain protected", 8*time.Second, func() bool { return held("ac", "ag", "b", "bc") }); err != nil {
 		return err
 	}
@@ -958,9 +1020,6 @@ func scenario(repo string, result *report) (err error) {
 	}
 	modeA.Store(5)
 	modeB.Store(5)
-	if err = config.Save(filepath.Join(profile, "config.yaml"), cfg); err != nil {
-		return err
-	}
 	if err = waitFor("fresh recovery checks reach gated servers", 6*time.Second, func() bool { return recoveryRequests.Load() >= 2 }); err != nil {
 		return err
 	}

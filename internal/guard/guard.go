@@ -19,6 +19,8 @@ package guard
 
 import (
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -58,20 +60,44 @@ const (
 	DomainIPNotAllowed         // a service host sees an exit not allowed for its app
 	ProcessPolicyDenied        // another matching app or ancestor policy holds a child
 	IPv6Conflict               // IPv6 services returned conflicting addresses
+	AppCheckPending            // a newly enabled app is waiting for a current check
+	SettingsChanged
+	CountryUnknown
+	IPv6CountryUnknown
 )
 
 const (
 	// FastCheck is the re-check interval while something is wrong.
 	FastCheck = 2 * time.Second
-	// probeStuck guards against a check that never reports back.
-	probeStuck = 30 * time.Second
-	historyLen = 50
+	// MaxProbeAge bounds completed results as well as checks that never report
+	// back. The production request budget is 12 seconds.
+	MaxProbeAge = 15 * time.Second
+	probeStuck  = MaxProbeAge
+	historyLen  = 50
 )
 
 // Forever pauses until Zaslon restarts.
 const Forever = time.Duration(1<<63 - 1)
 
+type ProbePart int
+
+const (
+	CompleteProbe ProbePart = iota
+	DomainFamily
+	DomainGroup
+	GeneralMeasurement
+)
+
+type ProbePlan struct {
+	General bool
+	Apps    map[string]bool // running service policies due for a measurement
+}
+
 type ProbeResult struct {
+	Retry           chan bool // buffered reply to a family timeout, after enforcement
+	Part            ProbePart
+	Sample          DomainResult
+	SampleIPv6      bool
 	ID              uint64 // identifies one check; superseded/duplicate results are ignored
 	IP, Country     string
 	Votes           int      // how many IP services agreed on IP
@@ -92,7 +118,7 @@ type Deps struct {
 	NetworkDetails func(after, through uint64) []string // copied diagnostics for the observed revisions
 	NetworkError   func() error
 	// StartProbe begins an IP check in the background; its result must come back through HandleProbe.
-	StartProbe func(c *config.Config, id uint64, domains bool) (cancel func())
+	StartProbe func(c *config.Config, id uint64, plan ProbePlan) (cancel func())
 	Procs      procs.Suspender
 	SaveConfig func(*config.Config) error
 	Self       int
@@ -100,15 +126,15 @@ type Deps struct {
 
 // group is a set of apps sharing one allow-list, with its own state.
 type group struct {
-	key            string // "" for the shared rules, else the app_rules key
-	tgts           []procs.Target
-	status         Status
-	reason         Reason
-	since          time.Time
-	frozen         map[int]procs.Proc
-	running        []procs.Proc
-	timeoutRetried bool // one immediate domain retry until a verified success or invalidation
-	recovering     bool // adopted holds require confirmed evidence before ignored failures may apply
+	key     string // "" for the shared rules, else the app_rules key
+	tgts    []procs.Target
+	status  Status
+	reason  Reason
+	since   time.Time
+	frozen  map[int]procs.Proc
+	running []procs.Proc
+
+	recovering bool // adopted holds require confirmed evidence before ignored failures may apply
 }
 
 func newGroup(key string, st Status) *group {
@@ -149,6 +175,7 @@ type Guard struct {
 	nextCheck           time.Time
 	probing             bool
 	probeStarted        time.Time
+	awaitingApps        map[string]bool
 	pausedUntil         time.Time
 	releasing           map[int]procs.Proc // removed rules whose processes could not be resumed yet
 	failures            map[operationKey]string
@@ -157,8 +184,17 @@ type Guard struct {
 	domains             map[string][]DomainResult
 	nextDomainCheck     time.Time
 	domainStarted       time.Time
+	activeDomains       map[string]bool
+	plan                ProbePlan
+	retried             map[domainFamily]bool
 	checkingDomains     bool
+	readyGroups         map[string]bool // complete policies in the in-flight generation
+	earlyDenials        map[string]domainHold
+	generalReady        bool
+	measuredAt          time.Time
 	dnsWarned           string
+	lastIPv4, lastIPv6  exitEvidence
+	serviceEvidence     map[serviceSource]serviceEvidence
 
 	counters Counters
 	history  []Event
@@ -180,7 +216,7 @@ type Counters struct {
 }
 
 func New(cfg *config.Config, d Deps) *Guard {
-	g := &Guard{d: d, releasing: map[int]procs.Proc{}, failures: map[operationKey]string{}}
+	g := &Guard{d: d, releasing: map[int]procs.Proc{}, failures: map[operationKey]string{}, serviceEvidence: map[serviceSource]serviceEvidence{}}
 	g.setConfig(cfg)
 	return g
 }
@@ -196,6 +232,7 @@ func (g *Guard) OnChange(f func(Snapshot, []Event)) {
 // It returns apps it un-froze because they are no longer protected.
 func (g *Guard) setConfig(c *config.Config) []procs.Proc {
 	g.cfg = c.Clone()
+	g.pruneEvidence()
 	all := procs.Targets(g.cfg)
 	byKey := map[string][]procs.Target{}
 	order := []string{""}
@@ -212,19 +249,18 @@ func (g *Guard) setConfig(c *config.Config) []procs.Proc {
 	old := map[string]*group{}
 	type heldProcess struct {
 		process    procs.Proc
-		reason     Reason
 		recovering bool
 	}
 	var held []heldProcess
 	for _, gr := range g.groups {
 		old[gr.key] = gr
 		for _, p := range gr.frozen {
-			held = append(held, heldProcess{p, gr.reason, g.recoveryPending(p)})
+			held = append(held, heldProcess{p, g.recoveryPending(p)})
 		}
 		gr.frozen = map[int]procs.Proc{}
 	}
 	for _, p := range g.releasing {
-		held = append(held, heldProcess{p, NoReason, g.recoveryPending(p)})
+		held = append(held, heldProcess{p, g.recoveryPending(p)})
 	}
 	clear(g.releasing)
 	// A new group starts where the shared group is: reevaluateAll fixes it right
@@ -262,9 +298,7 @@ func (g *Guard) setConfig(c *config.Config) []procs.Proc {
 			g.releasing[p.PID] = p
 		} else {
 			g.operation("freeze", p, nil)
-			if h.reason != NetChanged {
-				resumed = append(resumed, p)
-			}
+			resumed = append(resumed, p)
 		}
 	}
 	return resumed
@@ -295,7 +329,9 @@ func (g *Guard) emit(now time.Time, e Event) {
 	case EvFrozen:
 		g.counters.Freezes++
 	case EvResumed:
-		g.counters.Saves++
+		if e.Reason != NoReason {
+			g.counters.Saves++
+		}
 	case EvBlocked:
 		g.counters.Blocks++
 	case EvKilledNew:
@@ -306,6 +342,9 @@ func (g *Guard) emit(now time.Time, e Event) {
 		g.history = g.history[len(g.history)-historyLen:]
 	}
 	g.pending = append(g.pending, e)
+	if g.listener == nil && len(g.pending) > historyLen {
+		g.pending = g.pending[len(g.pending)-historyLen:]
+	}
 }
 
 // publish must be called with g.mu held; it runs the listener without the lock.
@@ -316,9 +355,9 @@ func (g *Guard) publish(now time.Time) {
 		return
 	}
 	g.lastKey = key
-	evs := g.pending
-	g.pending = nil
 	if f := g.listener; f != nil {
+		evs := g.pending
+		g.pending = nil
 		g.mu.Unlock()
 		f(s, evs)
 		g.mu.Lock()
@@ -405,22 +444,29 @@ func (g *Guard) observeNetwork(now time.Time) {
 	}
 }
 
-func (g *Guard) invalidate(now time.Time) {
+func (g *Guard) cancelCurrentProbe() {
 	if g.cancelProbe != nil {
 		g.cancelProbe()
 		g.cancelProbe = nil
 	}
-	g.verified, g.probing = false, false
+	g.probing = false
+	g.readyGroups, g.earlyDenials, g.generalReady = nil, nil, false
+}
+
+func (g *Guard) invalidate(now time.Time) { g.invalidateFor(now, NetChanged) }
+
+func (g *Guard) invalidateFor(now time.Time, why Reason) {
+	g.cancelCurrentProbe()
+	g.verified = false
 	g.domains = nil
-	for _, gr := range g.groups {
-		gr.timeoutRetried = false
-	}
+	g.domainStarted = time.Time{}
+	g.retried = make(map[domainFamily]bool)
 	g.nextDomainCheck = time.Time{}
 	g.nextCheck = now
 	if !g.paused(now) {
 		// Change every group's state before enforcement, avoiding intermediate resumes.
 		for _, gr := range g.groups {
-			gr.status, gr.reason, gr.since = Suspect, NetChanged, now
+			gr.status, gr.reason, gr.since = Suspect, why, now
 		}
 		g.enforce(now)
 	}
@@ -437,10 +483,17 @@ func (g *Guard) startProbe(now time.Time) {
 	g.probeID++
 	g.probing, g.probeStarted = true, now
 	g.checkingDomains = g.domainsDue(now)
+	g.readyGroups, g.earlyDenials, g.generalReady = make(map[string]bool), make(map[string]domainHold), false
 	if g.checkingDomains {
-		g.nextDomainCheck = now.Add(DomainInterval)
+		g.nextDomainCheck = now.Add(g.cfg.DomainCheckInterval.D())
 	}
-	g.cancelProbe = g.d.StartProbe(g.cfg.Clone(), g.probeID, g.checkingDomains)
+	g.plan = ProbePlan{General: !now.Before(g.nextCheck)}
+	if g.checkingDomains {
+		g.plan.Apps = maps.Clone(g.activeDomains)
+	}
+	plan := g.plan
+	plan.Apps = maps.Clone(plan.Apps) // the worker owns its copy while apps can exit
+	g.cancelProbe = g.d.StartProbe(g.cfg.Clone(), g.probeID, plan)
 }
 
 // HandleProbe takes the result of an IP check started by StartProbe.
@@ -448,9 +501,28 @@ func (g *Guard) HandleProbe(now time.Time, r ProbeResult) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer g.publish(now)
+	retry := false
+	if r.Retry != nil {
+		defer func() { r.Retry <- retry }()
+	}
 	g.observeNetwork(now)
 	if !g.probing || r.ID != g.probeID {
 		g.startProbe(now)
+		return
+	}
+	if !freshProbe(g.probeStarted, now) {
+		g.invalidate(now)
+		g.emit(now, Event{Kind: EvNetChanged, Details: []string{"source=probe kind=expired-result; fresh verification required"}})
+		g.startProbe(now)
+		return
+	}
+	if r.Part != CompleteProbe {
+		if g.checkingDomains {
+			g.handleProgress(now, r)
+			if r.Retry != nil && r.Part == DomainFamily {
+				retry = g.retryDomainFamily(now, r)
+			}
+		}
 		return
 	}
 	if g.cancelProbe != nil {
@@ -460,16 +532,37 @@ func (g *Guard) HandleProbe(now time.Time, r ProbeResult) {
 	g.probing = false
 	g.known = true
 	g.verified = true // each group evaluates the completed check's own source
+	for _, gr := range g.groups {
+		if g.plan.Apps[gr.key] || (g.plan.General && !g.cfg.DomainCheckEnabled(gr.key)) {
+			g.markGroupReady(gr)
+		}
+	}
+	for app := range r.Domains {
+		if !g.plan.Apps[app] {
+			delete(r.Domains, app)
+		}
+	}
+	g.rememberDomains(now, r)
+	if g.plan.General && !g.generalReady {
+		g.acceptGeneral(now, r)
+	}
+	g.readyGroups, g.earlyDenials, g.generalReady = nil, nil, false
 	if g.checkingDomains {
+		if !g.plan.General && g.cfg.DNSCheck == "block" {
+			g.dns, g.dnsCC = r.DNS, r.DNSCountry
+		}
 		g.domains = cloneDomains(r.Domains)
 		g.domainStarted = g.probeStarted
 		// The completed result is enforced before recording its diagnostics.
-		defer func() {
-			g.recordDomainDiagnostics(now, r.ID)
-			g.retryTimedOutDomains(now)
-		}()
+		defer g.recordDomainDiagnostics(now, r.ID)
 	}
 
+	g.reevaluateAll(now)
+}
+
+func (g *Guard) acceptGeneral(now time.Time, r ProbeResult) {
+	g.measuredAt = g.probeStarted
+	g.rememberGeneral(r)
 	if r.NetID != g.netID {
 		g.netID = r.NetID
 		if n, ok := g.cfg.Trusted(r.NetID); ok {
@@ -487,8 +580,6 @@ func (g *Guard) HandleProbe(now time.Time, r ProbeResult) {
 		}
 		g.offline, g.ip, g.country, g.votes, g.others = true, "", "", 0, nil
 		g.dns, g.dnsCC = r.DNS, r.DNSCountry
-		g.nextCheck = now.Add(FastCheck)
-		g.reevaluateAll(now)
 		return
 	}
 
@@ -508,7 +599,6 @@ func (g *Guard) HandleProbe(now time.Time, r ProbeResult) {
 			g.emit(now, Event{Kind: EvDNSLeak, IP: g.dns, Country: g.dnsCC, Notify: true})
 		}
 	}
-	g.reevaluateAll(now)
 }
 
 // verdict says why apps are held. NoReason permits running; ignored checks are
@@ -524,9 +614,12 @@ func (g *Guard) reevaluateAll(now time.Time) {
 	allOK := true
 	for _, gr := range g.groups {
 		g.reevaluate(now, gr)
-		if (gr.status != OK || len(g.assess(gr, now).ignored) > 0) && len(gr.tgts) > 0 {
+		if !g.cfg.DomainCheckEnabled(gr.key) && (gr.status != OK || len(g.assess(gr, now).ignored) > 0) && len(gr.tgts) > 0 {
 			allOK = false
 		}
+	}
+	if !g.plan.General {
+		return
 	}
 	if allOK {
 		g.nextCheck = now.Add(g.cfg.CheckInterval.D())
@@ -536,7 +629,7 @@ func (g *Guard) reevaluateAll(now time.Time) {
 }
 
 func (g *Guard) reevaluate(now time.Time, gr *group) {
-	if g.paused(now) {
+	if g.paused(now) || (g.cfg.DomainCheckEnabled(gr.key) && !g.activeDomains[gr.key]) {
 		gr.status, gr.reason = OK, NoReason
 		return
 	}
@@ -551,7 +644,7 @@ func (g *Guard) reevaluate(now time.Time, gr *group) {
 	case Suspect:
 		if gr.reason != why {
 			gr.reason = why
-			g.announceFrozen(now, gr)
+			g.announceHoldReason(now, gr)
 		}
 	case Blocked:
 		gr.reason = why
@@ -562,10 +655,15 @@ func (g *Guard) event(now time.Time, gr *group, kind EventKind, apps []string, n
 	e := Event{Kind: kind, Reason: gr.reason, IP: g.ip, Country: g.country, IP6: g.ip6, Country6: g.cc6,
 		Others: g.others, DNS: g.dns, DNSCountry: g.dnsCC, Apps: apps, Notify: notify}
 	e.IgnoredChecks = len(g.assess(gr, now).ignored) > 0
-	if kind == EvFrozen {
+	if (kind == EvFrozen || kind == EvHoldReason) && gr.reason != NoReason && gr.reason != NetChanged && gr.reason != SettingsChanged && gr.status != OK {
 		e.Details = g.domainDiagnostics(gr, now)
 	}
-	if measurements := g.domains[gr.key]; len(measurements) > 0 {
+	if kind == EvFrozen || kind == EvHoldReason {
+		e.Issues = g.domainIssues(gr, now)
+		if len(e.Issues) > 0 {
+			e.Domain = e.Issues[0].Endpoint
+		}
+	} else if measurements := g.domains[gr.key]; len(measurements) > 0 {
 		d := measurements[0]
 		e.Domain = d.Endpoint
 		e.IP, e.Country, e.IP6, e.Country6 = d.IP, d.Country, d.IP6, d.Country6
@@ -575,39 +673,57 @@ func (g *Guard) event(now time.Time, gr *group, kind EventKind, apps []string, n
 
 func (g *Guard) toOK(now time.Time, gr *group) {
 	gr.recovering = false // verdict accepted a current result without ignored checks
-	resumed := g.resumePermitted(gr, now)
-	switch gr.status {
-	case Suspect:
-		if len(resumed) > 0 {
-			g.emit(now, g.event(now, gr, EvResumed, procs.AppNames(resumed), gr.reason != NetChanged))
-		}
-	case Blocked:
+	g.resumePermitted(gr, now)
+	if gr.status == Blocked {
 		g.emit(now, g.event(now, gr, EvUnblocked, gr.names(), true))
 	}
 	gr.status, gr.reason = OK, NoReason
 }
 
 func (g *Guard) toSuspect(now time.Time, gr *group, r Reason) {
+	alreadyHeld := gr.status == Starting && len(gr.frozen) > 0
 	gr.status, gr.reason, gr.since = Suspect, r, now
-	g.nextCheck = now
+	if !g.cfg.DomainCheckEnabled(gr.key) {
+		g.nextCheck = now
+	}
 	g.enforce(now) // freeze right now, not on the next tick
-	g.announceFrozen(now, gr)
+	if alreadyHeld {
+		g.announceHoldReason(now, gr)
+	}
 }
 
-// announceFrozen tells about the freeze unless it's a routine network-change check.
-func (g *Guard) announceFrozen(now time.Time, gr *group) {
-	if gr.reason == NetChanged {
+func (g *Guard) announceHoldReason(now time.Time, gr *group) {
+	if len(gr.frozen) > 0 {
+		g.emit(now, g.event(now, gr, EvHoldReason, procs.AppNames(mapValues(gr.frozen)), true))
+	}
+}
+
+func (g *Guard) recordRelease(now time.Time, resumed []procs.Proc, cause string) {
+	if len(resumed) == 0 {
 		return
 	}
-	g.emit(now, g.event(now, gr, EvFrozen, procs.AppNames(mapValues(gr.frozen)), len(gr.frozen) > 0))
+	g.emit(now, Event{Kind: EvResumed, Apps: procs.AppNames(resumed),
+		Details: []string{fmt.Sprintf("processes=%d; cause=%s", len(resumed), cause)}})
 }
 
 func (g *Guard) resume(gr *group) []procs.Proc {
 	return g.resumeMatching(gr, func(procs.Proc) bool { return true })
 }
 
-func (g *Guard) resumePermitted(gr *group, now time.Time) []procs.Proc {
-	return g.resumeMatching(gr, func(p procs.Proc) bool { return g.processAllowed(p, now) })
+func (g *Guard) resumePermitted(gr *group, now time.Time) {
+	resumed := g.resumeMatching(gr, func(p procs.Proc) bool { return g.processPermitted(p, now, g.probing && g.checkingDomains) })
+	if len(resumed) == 0 {
+		return
+	}
+	e := g.event(now, gr, EvResumed, procs.AppNames(resumed), gr.reason != NetChanged && gr.reason != SettingsChanged && gr.status != Starting)
+	if gr.status == OK {
+		e.Reason = ProcessPolicyDenied
+		// Only this process's full set of policies permitted release. The
+		// group's own endpoint does not describe the earlier denial.
+		e.Notify = false
+	}
+	e.Details = []string{fmt.Sprintf("processes=%d", len(resumed))}
+	g.emit(now, e)
 }
 
 func (g *Guard) resumeMatching(gr *group, permitted func(procs.Proc) bool) []procs.Proc {
@@ -640,27 +756,32 @@ func (g *Guard) operation(op string, p procs.Proc, err error) {
 	}
 }
 
-func (g *Guard) retryReleases() {
+func (g *Guard) retryReleases() []procs.Proc {
+	var resumed []procs.Proc
 	for pid, p := range g.releasing {
 		err := g.d.Procs.Resume(p)
 		g.operation("resume", p, err)
 		if err == nil {
 			delete(g.releasing, pid)
+			g.operation("freeze", p, nil)
+			resumed = append(resumed, p)
 		}
 	}
+	return resumed
 }
 
-func (g *Guard) resumeAll() {
-	g.retryReleases()
+func (g *Guard) resumeAll() []procs.Proc {
+	resumed := g.retryReleases()
 	for _, gr := range g.groups {
-		g.resume(gr)
+		resumed = append(resumed, g.resume(gr)...)
 	}
+	return resumed
 }
 
 // anyAlarm: apps are frozen because something is wrong (not the short freeze at start).
 func (g *Guard) anyAlarm() bool {
 	for _, gr := range g.groups {
-		if gr.status == Suspect && gr.reason != NetChanged && len(gr.frozen) > 0 {
+		if gr.status == Suspect && gr.reason != NetChanged && gr.reason != SettingsChanged && len(gr.frozen) > 0 {
 			return true
 		}
 	}
@@ -691,7 +812,8 @@ func (g *Guard) ownerOf(p procs.Proc) *group {
 }
 
 // releaseUntargeted resumes frozen processes that no group claims any more.
-func (g *Guard) releaseUntargeted() {
+func (g *Guard) releaseUntargeted() []procs.Proc {
+	var resumed []procs.Proc
 	for _, gr := range g.groups {
 		for pid, p := range gr.frozen {
 			if g.ownerOf(p) == nil {
@@ -699,39 +821,69 @@ func (g *Guard) releaseUntargeted() {
 				g.operation("resume", p, err)
 				if err == nil {
 					delete(gr.frozen, pid)
+					g.operation("freeze", p, nil)
+					resumed = append(resumed, p)
 				}
 			}
 		}
 	}
+	return resumed
 }
 
 // A directly matched child must also satisfy its ancestors' policies. Policy
 // checks use the complete current result, never another group's old status.
 func (g *Guard) processAllowed(p procs.Proc, now time.Time) bool {
+	return g.processPermitted(p, now, false)
+}
+
+func (g *Guard) processPermitted(p procs.Proc, now time.Time, fresh bool) bool {
 	if g.paused(now) {
 		return true
 	}
-	if !g.verified {
+	if fresh && !g.generalReady && g.verified && g.trusted() {
+		return false
+	}
+	if g.awaitingAppCheck(p) {
 		return false
 	}
 	if g.policyJournalFailed {
 		return false
 	}
+	matched := false
 	ids := append([]string{p.AppID}, p.PolicyIDs...)
 	for _, id := range ids {
 		for _, gr := range g.groups {
 			for _, target := range gr.tgts {
-				if target.ID == id && g.verdict(gr, now) != NoReason {
+				if target.ID != id {
+					continue
+				}
+				matched = true
+				if (fresh || !g.verified) && !g.readyGroups[gr.key] {
+					return false
+				}
+				if g.verdict(gr, now) != NoReason {
 					return false
 				}
 			}
 		}
 	}
-	return true
+	return matched
+}
+
+func (g *Guard) awaitingAppCheck(p procs.Proc) bool {
+	if g.awaitingApps[p.AppID] {
+		return true
+	}
+	for _, id := range p.PolicyIDs {
+		if g.awaitingApps[id] {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Guard) enforce(now time.Time) {
-	g.retryReleases()
+	g.recordRelease(now, g.retryReleases(), "protection removed")
 	all, err := g.d.Procs.List()
 	g.operation("list", procs.Proc{}, err)
 	if err != nil {
@@ -751,6 +903,23 @@ func (g *Guard) enforce(now time.Time) {
 	for _, p := range all {
 		aliveNow[p.PID] = p
 	}
+	// Release only a positively identified own control process if an older
+	// version had suspended it. The identity check remains in the controller.
+	var controlReleased []procs.Proc
+	for _, gr := range g.groups {
+		for pid, held := range gr.frozen {
+			if current, ok := aliveNow[pid]; ok && current.Control && procs.SameProcess(current, held) {
+				err := g.d.Procs.Resume(held)
+				g.operation("resume", held, err)
+				if err == nil {
+					delete(gr.frozen, pid)
+					g.operation("freeze", held, nil)
+					controlReleased = append(controlReleased, held)
+				}
+			}
+		}
+	}
+	g.recordRelease(now, controlReleased, "control process excluded")
 	remembered := map[int]procs.Proc{}
 	for _, gr := range g.groups {
 		for _, p := range append(append([]procs.Proc{}, gr.running...), mapValues(gr.frozen)...) {
@@ -846,22 +1015,22 @@ func (g *Guard) enforce(now time.Time) {
 				gr.running = append(gr.running, p)
 			}
 		}
+	}
+	g.updateActiveDomains(remembered)
+	for _, gr := range g.groups {
 		g.enforceGroup(now, gr)
 	}
 }
 
 func (g *Guard) enforceGroup(now time.Time, gr *group) {
 	if g.paused(now) {
-		g.resume(gr)
+		g.recordRelease(now, g.resume(gr), "protection paused")
 		return
 	}
 	if gr.status == OK {
-		if resumed := g.resumePermitted(gr, now); len(resumed) > 0 {
-			e := g.event(now, gr, EvResumed, procs.AppNames(resumed), true)
-			e.Reason = ProcessPolicyDenied
-			g.emit(now, e)
-		}
+		g.resumePermitted(gr, now)
 	}
+	var frozen []procs.Proc
 	alive := map[int]bool{}
 	for _, p := range gr.running {
 		alive[p.PID] = true
@@ -871,11 +1040,7 @@ func (g *Guard) enforceGroup(now time.Time, gr *group) {
 				g.operation("freeze", p, err)
 				if err == nil {
 					gr.frozen[p.PID] = p
-					if gr.status == OK {
-						e := g.event(now, gr, EvFrozen, []string{p.App}, true)
-						e.Reason = ProcessPolicyDenied
-						g.emit(now, e)
-					}
+					frozen = append(frozen, p)
 				} else if owner, ok := g.d.Procs.(interface{ Owns(procs.Proc) bool }); ok && owner.Owns(p) {
 					// The OS may have suspended it before a journal/result failure.
 					gr.frozen[p.PID] = p
@@ -888,28 +1053,52 @@ func (g *Guard) enforceGroup(now time.Time, gr *group) {
 			delete(gr.frozen, pid)
 		}
 	}
+	if len(frozen) > 0 {
+		e := g.event(now, gr, EvFrozen, procs.AppNames(frozen), gr.reason != NetChanged && gr.reason != SettingsChanged && gr.status != Starting)
+		if gr.status == OK {
+			e.Reason = ProcessPolicyDenied
+			if slices.ContainsFunc(frozen, g.awaitingAppCheck) {
+				e.Reason, e.Notify = AppCheckPending, false
+			}
+		}
+		e.Details = append(e.Details, fmt.Sprintf("processes=%d", len(frozen)))
+		g.emit(now, e)
+	}
 }
 
-func (g *Guard) save() {
+// Persist before installing a change or announcing a grant. A failed write
+// leaves both the current policy and its in-flight checks intact.
+func (g *Guard) persist(c *config.Config) error {
 	if g.d.SaveConfig != nil {
-		_ = g.d.SaveConfig(g.cfg.Clone())
+		if err := g.d.SaveConfig(c); err != nil {
+			return fmt.Errorf("config.yaml: %w", err)
+		}
 	}
+	return nil
 }
 
-// ---- actions from the menu, the panel and the CLI ----
-
-// apply swaps in an edited config and re-checks everything against it.
-func (g *Guard) apply(now time.Time, c *config.Config, save bool) {
-	g.invalidate(now) // settings must not release apps using a previous network's IP
-	if resumed := g.setConfig(c); len(resumed) > 0 {
-		g.emit(now, Event{Kind: EvResumed, IP: g.ip, Country: g.country, Apps: procs.AppNames(resumed), Notify: true})
+func (g *Guard) apply(now time.Time, c *config.Config) {
+	// Strip only fields which cannot affect protection. Newly added policy
+	// fields participate in the comparison by default.
+	previous := *g.cfg
+	previous.Language, previous.MenuBar, previous.Theme = c.Language, c.MenuBar, c.Theme
+	previous.Notifications, previous.UpdateCheck = c.Notifications, c.UpdateCheck
+	if g.seenNetwork && reflect.DeepEqual(&previous, c) {
+		g.cfg = c.Clone()
+		return
 	}
-	g.releaseUntargeted()
-	if save {
-		g.save()
-	}
-	g.enforce(now)
+	g.invalidateFor(now, SettingsChanged)
+	clear(g.awaitingApps)
+	g.reconfigure(now, c)
 	g.startProbe(now)
+}
+
+func (g *Guard) reconfigure(now time.Time, c *config.Config) {
+	resumed := g.setConfig(c)
+	resumed = append(resumed, g.releaseUntargeted()...)
+	g.recordRelease(now, resumed, "protection removed")
+	g.expireDomains(now)
+	g.enforce(now)
 }
 
 // SetConfig applies an edited config.yaml.
@@ -917,17 +1106,35 @@ func (g *Guard) SetConfig(now time.Time, c *config.Config) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer g.publish(now)
-	g.apply(now, c, false)
+	g.apply(now, c.Clone())
+}
+
+// ReloadConfig serializes an external read with menu and panel saves. A nil
+// config means the file has not changed since the last successful read/write.
+func (g *Guard) ReloadConfig(now time.Time, read func() (*config.Config, error)) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	c, err := read()
+	if c == nil || err != nil {
+		return false, err
+	}
+	defer g.publish(now)
+	g.apply(now, c.Clone())
+	return true, nil
 }
 
 // Update changes the config from the menu or the panel and saves it.
-func (g *Guard) Update(now time.Time, fn func(*config.Config)) {
+func (g *Guard) Update(now time.Time, fn func(*config.Config)) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer g.publish(now)
 	c := g.cfg.Clone()
 	fn(c)
-	g.apply(now, c, true)
+	if err := g.persist(c); err != nil {
+		return err
+	}
+	g.apply(now, c)
+	return nil
 }
 
 func (g *Guard) AllowCurrentIP(now time.Time) bool {
@@ -939,14 +1146,14 @@ func (g *Guard) AllowCurrentIP(now time.Time) bool {
 	}
 	c := g.cfg.Clone()
 	added := c.Allow.AddIP(g.ip)
-	if g.ip6 != "" && c.Allow.AddIP(g.ip6) {
-		added = true
-	}
 	if !added {
 		return false
 	}
+	if err := g.persist(c); err != nil {
+		return false
+	}
 	g.emit(now, Event{Kind: EvAllowedIP, IP: g.ip, Country: g.country})
-	g.apply(now, c, true)
+	g.apply(now, c)
 	return true
 }
 
@@ -959,44 +1166,97 @@ func (g *Guard) AllowCurrentCountry(now time.Time) bool {
 	}
 	c := g.cfg.Clone()
 	added := c.Allow.AddCountry(g.country)
-	if g.ip6 != "" && c.Allow.AddCountry(g.cc6) {
-		added = true
-	}
 	if !added {
 		return false
 	}
+	if err := g.persist(c); err != nil {
+		return false
+	}
 	g.emit(now, Event{Kind: EvAllowedCountry, IP: g.ip, Country: g.country})
-	g.apply(now, c, true)
+	g.apply(now, c)
 	return true
 }
 
 // TrustCurrentNetwork marks the local network Zaslon is on as trusted.
 func (g *Guard) TrustCurrentNetwork(now time.Time, name string) bool {
+	return g.TrustNetwork(now, "", name)
+}
+
+// TrustNetwork binds a panel confirmation to the router identity displayed to
+// the user. A network change while the dialog is open cannot trust another LAN.
+func (g *Guard) TrustNetwork(now time.Time, expected, name string) bool {
+	ok, _ := g.SaveTrustedNetwork(now, expected, name)
+	return ok
+}
+
+func (g *Guard) SaveTrustedNetwork(now time.Time, expected, name string) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer g.publish(now)
-	if g.netID == "" || g.trusted() {
-		return false
+	if g.netID == "" || g.trusted() || (expected != "" && expected != g.netID) {
+		return false, nil
 	}
 	if name = strings.TrimSpace(name); name == "" {
 		name = g.netID
 	}
 	c := g.cfg.Clone()
 	c.TrustedNetworks = append(c.TrustedNetworks, config.TrustedNetwork{Name: name, ID: g.netID})
+	if err := g.persist(c); err != nil {
+		return false, err
+	}
 	g.emit(now, Event{Kind: EvTrusted, Network: name})
-	g.apply(now, c, true)
-	return true
+	g.apply(now, c)
+	return true, nil
 }
 
 // ToggleApp turns a built-in preset on or off.
-func (g *Guard) ToggleApp(now time.Time, id string) {
-	g.Update(now, func(c *config.Config) {
-		if i := slices.Index(c.Apps, id); i >= 0 {
-			c.Apps = slices.Delete(c.Apps, i, i+1)
-		} else {
-			c.Apps = append(c.Apps, id)
+func (g *Guard) ToggleApp(now time.Time, id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.setAppEnabled(now, id, !slices.Contains(g.cfg.Apps, id))
+}
+
+// SetAppEnabled applies the choice shown in a menu even if another UI has
+// already applied it while the menu was open.
+func (g *Guard) SetAppEnabled(now time.Time, id string, enabled bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.setAppEnabled(now, id, enabled)
+}
+
+func (g *Guard) setAppEnabled(now time.Time, id string, enabled bool) error {
+	if _, ok := procs.PresetByID(id); !ok {
+		return fmt.Errorf("unknown application %q", id)
+	}
+	defer g.publish(now)
+	g.observeNetwork(now)
+	if slices.Contains(g.cfg.Apps, id) == enabled {
+		return nil
+	}
+	c := g.cfg.Clone()
+	i := slices.Index(c.Apps, id)
+	if i >= 0 {
+		c.Apps = slices.Delete(c.Apps, i, i+1)
+	} else {
+		c.Apps = append(c.Apps, id)
+	}
+	if err := g.persist(c); err != nil {
+		return err
+	}
+	if i >= 0 {
+		delete(g.awaitingApps, id)
+	} else {
+		if g.awaitingApps == nil {
+			g.awaitingApps = make(map[string]bool)
 		}
-	})
+		g.awaitingApps[id] = true
+		delete(g.domains, id)
+		g.cancelCurrentProbe()
+		g.nextCheck, g.nextDomainCheck = now, time.Time{}
+	}
+	g.reconfigure(now, c)
+	g.startProbe(now)
+	return nil
 }
 
 // Pause stops protecting for d (Forever = until restart).
@@ -1009,13 +1269,15 @@ func (g *Guard) Pause(now time.Time, d time.Duration) {
 	} else {
 		g.pausedUntil = now.Add(d)
 	}
+	var resumed []procs.Proc
 	for _, gr := range g.groups {
 		gr.status, gr.reason = OK, NoReason
-		g.resume(gr)
+		resumed = append(resumed, g.resume(gr)...)
 		if len(gr.frozen) == 0 {
 			gr.recovering = false
 		}
 	}
+	g.recordRelease(now, resumed, "protection paused")
 	g.emit(now, Event{Kind: EvPaused, Dur: d})
 }
 
@@ -1040,16 +1302,39 @@ func (g *Guard) CheckNow(now time.Time) {
 	g.mu.Unlock()
 }
 
+// Recheck invalidates proof after an event-loop interruption, even when the
+// interface fingerprint and network callback revision have not changed.
+func (g *Guard) Recheck(now time.Time, detail string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.invalidate(now)
+	g.emit(now, Event{Kind: EvNetChanged, Details: []string{detail}})
+	g.publish(now)
+}
+
+func freshProbe(start, now time.Time) bool {
+	if start.IsZero() {
+		return false
+	}
+	// Some monotonic clocks stop during sleep. Wall time also catches that
+	// interruption; a large clock correction must not validate old evidence.
+	elapsed := now.Sub(start)
+	wall := now.Round(0).Sub(start.Round(0))
+	return elapsed >= 0 && elapsed < MaxProbeAge && wall >= 0 && wall < MaxProbeAge
+}
+
 // Shutdown un-freezes everything; called on exit.
 func (g *Guard) Shutdown() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	now := time.Now()
+	defer g.publish(now)
 	if g.cancelProbe != nil {
 		g.cancelProbe()
 		g.cancelProbe = nil
 	}
 	g.probing = false
-	g.resumeAll()
+	g.recordRelease(now, g.resumeAll(), "Zaslon exiting")
 }
 
 func (g *Guard) Snapshot(now time.Time) Snapshot {

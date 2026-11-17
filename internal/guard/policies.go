@@ -22,27 +22,33 @@ func (g *Guard) assess(gr *group, now time.Time) assessment {
 }
 
 func (g *Guard) assessCurrent(gr *group, now time.Time) assessment {
-	if g.trusted() && !g.offline && g.ip != "" {
+	if (g.verified || g.generalReady) && g.trusted() && !g.offline && g.ip != "" {
 		return assessment{}
+	}
+	if reason := g.earlyDenials[gr.key].reason; reason != NoReason {
+		return assessment{reason: reason}
 	}
 	a := g.allowFor(gr)
 	if g.cfg.DomainCheckEnabled(gr.key) {
 		return g.assessDomains(gr, now, a)
 	}
+	if why := g.knownGeneralDenial(a); why != NoReason {
+		return assessment{reason: why}
+	}
 	var unavailable []Reason
 	if g.offline || g.ip == "" {
 		unavailable = append(unavailable, Offline)
 	} else {
-		if !a.Matches(g.ip, g.country) {
-			return assessment{reason: IPNotAllowed}
+		if why := addressReason(a, g.ip, g.country, IPNotAllowed, CountryUnknown); why != NoReason {
+			return assessment{reason: why}
 		}
 		if g.votes < g.cfg.Need() || len(g.others) > 0 {
 			return assessment{reason: Unconfirmed}
 		}
 	}
 	if g.cfg.CheckIPv6 {
-		if g.ip6 != "" && !a.Matches(g.ip6, g.cc6) {
-			return assessment{reason: IPv6Leak}
+		if why := addressReason(a, g.ip6, g.cc6, IPv6Leak, IPv6CountryUnknown); why != NoReason {
+			return assessment{reason: why}
 		}
 		if g.ipv6Conflicting {
 			return assessment{reason: IPv6Conflict}

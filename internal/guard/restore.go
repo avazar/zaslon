@@ -57,6 +57,7 @@ func (g *Guard) RestoreProtection() (int, error) {
 		all[i].App, all[i].AppID, all[i].PolicyIDs = "", "", nil
 	}
 	live := map[int]procs.Proc{}
+	var controls []procs.Proc
 	for _, p := range recorded {
 		i, exists := byPID[p.PID]
 		if !exists || (all[i].Created != "" && !procs.SameProcess(all[i], p)) {
@@ -64,6 +65,12 @@ func (g *Guard) RestoreProtection() (int, error) {
 		}
 		if p.PID <= 1 || p.PID == g.d.Self || all[i].Created == "" || !journal.Owns(p) {
 			return 0, fmt.Errorf("PID %d: cannot confirm recorded ownership", p.PID)
+		}
+		if all[i].Control {
+			// Own control processes are not protected traffic. Plan their
+			// release, but perform no OS operation during adoption.
+			controls = append(controls, p)
+			continue
 		}
 		ids := append(append([]string(nil), p.PolicyIDs...), p.AppID)
 		hasPolicy := false
@@ -107,6 +114,9 @@ func (g *Guard) RestoreProtection() (int, error) {
 			owner.running = append(owner.running, p)
 			g.markRecovering(p)
 		}
+	}
+	for _, p := range controls {
+		g.releasing[p.PID] = p
 	}
 	return len(adopted), nil
 }

@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-type osController struct{}
+type osController struct{ own string }
 
-func New() Controller { return &osController{} }
+func New() Controller { return &osController{own: executablePath()} }
 
 func (c *osController) List() ([]Proc, error) {
 	ents, err := os.ReadDir("/proc")
@@ -38,6 +38,12 @@ func (c *osController) List() ([]Proc, error) {
 		if isInterpreter(name) {
 			raw, _ := os.ReadFile(dir + "/cmdline")
 			p.Args = strings.TrimSpace(strings.ReplaceAll(string(raw), "\x00", " "))
+		}
+		if sameExecutable(path, c.own) && born != "" {
+			raw, _ := os.ReadFile(dir + "/cmdline")
+			argv := strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00")
+			p.control = ownRole(path, c.own, argv)
+			p.Control = p.control != notControl
 		}
 		out = append(out, p)
 	}

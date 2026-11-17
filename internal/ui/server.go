@@ -193,12 +193,14 @@ type appJSON struct {
 	Match               []string             `json:"match,omitempty"`
 	Enabled             bool                 `json:"enabled"`
 	Running             bool                 `json:"running"`
+	Frozen              int                  `json:"frozen"`
 	Status              string               `json:"status"`
 	Rule                *ruleJSON            `json:"rule"`
 	Domains             []string             `json:"domains"`
 	DefaultDomains      []string             `json:"defaultDomains"`
 	DomainChecksEnabled bool                 `json:"domainChecksEnabled"`
 	Measurements        []guard.DomainResult `json:"measurements"`
+	DomainIssue         string               `json:"domainIssue,omitempty"`
 	Reason              string               `json:"reason"`
 	Warnings            []string             `json:"warnings"`
 }
@@ -226,6 +228,7 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 	}
 	groupStatus := map[string]string{}
 	groupReason := map[string]string{}
+	groupIssue := map[string]string{}
 	measurements := map[string][]guard.DomainResult{}
 	groupWarnings := map[string][]string{}
 	var warnings []map[string]any
@@ -243,6 +246,7 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 		for _, a := range gr.Apps {
 			groupStatus[a] = st
 			groupReason[a] = reasonKey(gr.Reason)
+			groupIssue[a] = domainIssueList(gr.Issues)
 			measurements[a] = gr.Domains
 			for _, warning := range gr.Warnings {
 				groupWarnings[a] = append(groupWarnings[a], reasonKey(warning))
@@ -251,12 +255,13 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 	}
 	var apps []appJSON
 	for _, p := range procs.Presets {
-		a := appJSON{ID: p.ID, Name: p.Name, Enabled: slices.Contains(cfg.Apps, p.ID), Running: running[p.ID], Status: groupStatus[p.Name]}
+		a := appJSON{ID: p.ID, Name: p.Name, Enabled: slices.Contains(cfg.Apps, p.ID), Running: running[p.ID], Frozen: snap.FrozenApps[p.ID], Status: groupStatus[p.Name]}
 		a.Domains = cfg.DomainChecks[p.ID]
 		a.DefaultDomains = config.DefaultDomains(p.ID)
 		a.DomainChecksEnabled = cfg.DomainCheckEnabled(p.ID)
 		a.Measurements = measurements[p.Name]
 		a.Reason = groupReason[p.Name]
+		a.DomainIssue = groupIssue[p.Name]
 		a.Warnings = groupWarnings[p.Name]
 		if r, ok := cfg.AppRules[p.ID]; ok {
 			rj := ruleOf(r)
@@ -266,11 +271,12 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 	}
 	for _, c := range cfg.CustomApps {
 		id := strings.ToLower(c.Name)
-		a := appJSON{ID: id, Name: c.Name, Custom: true, Match: c.Match, Enabled: true, Running: running[id], Status: groupStatus[c.Name]}
+		a := appJSON{ID: id, Name: c.Name, Custom: true, Match: c.Match, Enabled: true, Running: running[id], Frozen: snap.FrozenApps[id], Status: groupStatus[c.Name]}
 		a.Domains = cfg.DomainChecks[id]
 		a.DomainChecksEnabled = cfg.DomainCheckEnabled(id)
 		a.Measurements = measurements[c.Name]
 		a.Reason = groupReason[c.Name]
+		a.DomainIssue = groupIssue[c.Name]
 		a.Warnings = groupWarnings[c.Name]
 		if r, ok := cfg.AppRules[id]; ok {
 			rj := ruleOf(r)
@@ -305,17 +311,17 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 		"lang": Lang, "goos": runtime.GOOS, "version": s.Version,
 		"status": panelStatus(snap), "statusText": StatusLine(snap), "reason": reasonKey(snap.Reason),
 		"paused": snap.Paused(), "pausedUntil": pausedUntil,
-		"ip": snap.IP, "country": countryOf(snap.Country), "ip6": snap.IP6, "country6": countryOf(snap.Country6), "ipv6Unknown": snap.IPv6Unknown,
+		"ip": snap.IP, "country": countryOf(snap.Country), "domainCountry": countryOf(snap.DomainCountry), "ip6": snap.IP6, "country6": countryOf(snap.Country6), "ipv6Unknown": snap.IPv6Unknown,
 		"others": snap.Others, "offline": snap.Offline, "allowedNow": snap.Allowed(), "errors": snap.Errors,
 		"warnings": warnings, "ipv6Conflicting": snap.IPv6Conflicting,
 		"dns": snap.DNS, "dnsCountry": countryOf(snap.DNSCountry), "dnsLeak": snap.DNSLeak,
 		"netId": snap.NetID, "network": snap.Network, "trusted": trusted,
 		"apps": apps, "allow": ruleOf(cfg.Allow),
 		"settings": map[string]any{
-			"check_interval": int(cfg.CheckInterval.D().Seconds()), "min_agree": cfg.MinAgree,
+			"domain_check_interval": int(cfg.DomainCheckInterval.D().Seconds()), "check_interval": int(cfg.CheckInterval.D().Seconds()), "min_agree": cfg.MinAgree,
 			"check_ipv6": cfg.CheckIPv6, "dns_check": cfg.DNSCheck, "notifications": cfg.Notifications,
 			"ip_unavailable_action": cfg.IPUnavailableAction, "ipv6_unavailable_action": cfg.IPv6UnavailableAction,
-			"menubar": cfg.MenuBar, "update_check": cfg.UpdateCheck, "language": cfg.Language,
+			"menubar": cfg.MenuBar, "update_check": cfg.UpdateCheck, "language": cfg.Language, "theme": cfg.Theme,
 		},
 		"autostart": app.AutostartEnabled(),
 		"stats":     map[string]any{"days": s.Stats.Last(14, now), "total": s.Stats.Total(), "session": snap.Counters},
@@ -326,12 +332,12 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 }
 
 func reasonKey(r guard.Reason) string {
-	return [...]string{"", "net", "ip", "offline", "v6", "unconf", "dns", "v6unknown", "domain_unknown", "domain_ip", "parent_policy", "v6conflict"}[r]
+	return [...]string{"", "net", "ip", "offline", "v6", "unconf", "dns", "v6unknown", "domain_unknown", "domain_ip", "parent_policy", "v6conflict", "app_check_pending", "settings_changed", "country_unknown", "country6_unknown"}[r]
 }
 
 func eventKind(k guard.EventKind) string {
 	switch k {
-	case guard.EvFrozen, guard.EvDNSLeak, guard.EvDomainCheck:
+	case guard.EvFrozen, guard.EvHoldReason, guard.EvDNSLeak, guard.EvDomainCheck:
 		return "warn"
 	case guard.EvBlocked, guard.EvKilledNew, guard.EvOffline:
 		return "bad"
@@ -388,13 +394,19 @@ func (s *Server) apply(a action) error {
 	g := s.G
 	switch a.Op {
 	case "allow_current_ip":
-		g.AllowCurrentIP(now)
+		if a.Value == "" {
+			return errors.New("confirm the exact IP before allowing it")
+		}
+		return s.editAllow(now, action{Op: "add_ip", Value: a.Value})
 	case "allow_current_country":
-		g.AllowCurrentCountry(now)
+		if a.Value == "" {
+			return errors.New("confirm the exact country before allowing it")
+		}
+		return s.editAllow(now, action{Op: "add_country", Value: a.Value})
 	case "add_ip", "remove_ip", "add_country", "remove_country":
 		return s.editAllow(now, a)
 	case "toggle_app":
-		g.ToggleApp(now, a.App)
+		return g.ToggleApp(now, a.App)
 	case "set_rule":
 		return s.setRule(now, a)
 	case "set_domains":
@@ -419,7 +431,7 @@ func (s *Server) apply(a action) error {
 		if current.DomainCheckEnabled(a.App) && len(endpoints) == 0 {
 			return errors.New("disable domain checks before saving an empty list")
 		}
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			if c.DomainChecks == nil {
 				c.DomainChecks = map[string][]string{}
 			}
@@ -434,16 +446,16 @@ func (s *Server) apply(a action) error {
 		if *a.Enabled && len(current.DomainChecks[a.App]) == 0 {
 			return errors.New("add at least one domain before enabling checks")
 		}
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			if c.DomainChecksEnabled == nil {
 				c.DomainChecksEnabled = map[string]bool{}
 			}
 			c.DomainChecksEnabled[a.App] = *a.Enabled
 		})
 	case "remove_rule":
-		g.Update(now, func(c *config.Config) { delete(c.AppRules, a.App) })
+		return g.Update(now, func(c *config.Config) { delete(c.AppRules, a.App) })
 	case "remove_custom":
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			c.CustomApps = slices.DeleteFunc(c.CustomApps, func(x config.CustomApp) bool { return strings.ToLower(x.Name) == a.App })
 			delete(c.AppRules, a.App)
 			delete(c.DomainChecks, a.App)
@@ -460,19 +472,26 @@ func (s *Server) apply(a action) error {
 		if name == "" || len(match) == 0 {
 			return errors.New(T("panel.err.custom"))
 		}
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			c.CustomApps = append(c.CustomApps, config.CustomApp{Name: name, Match: match})
 		})
 	case "trust_network":
-		if !g.TrustCurrentNetwork(now, a.Value) {
+		if a.App == "" {
+			return errors.New(T("panel.err.trust"))
+		}
+		added, err := g.SaveTrustedNetwork(now, a.App, a.Value)
+		if err != nil {
+			return err
+		}
+		if !added {
 			return errors.New(T("panel.err.trust"))
 		}
 	case "untrust_network":
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			c.TrustedNetworks = slices.DeleteFunc(c.TrustedNetworks, func(n config.TrustedNetwork) bool { return n.ID == a.Value })
 		})
 	case "rename_network":
-		g.Update(now, func(c *config.Config) {
+		return g.Update(now, func(c *config.Config) {
 			for i := range c.TrustedNetworks {
 				if c.TrustedNetworks[i].ID == a.App && strings.TrimSpace(a.Value) != "" {
 					c.TrustedNetworks[i].Name = strings.TrimSpace(a.Value)
@@ -535,7 +554,7 @@ func (s *Server) editAllow(now time.Time, a action) error {
 		r := c.AppRules[a.App]
 		return &r
 	}
-	s.G.Update(now, func(c *config.Config) {
+	return s.G.Update(now, func(c *config.Config) {
 		if a.App != "" && c.AppRules == nil {
 			c.AppRules = map[string]config.Allow{}
 		}
@@ -554,7 +573,6 @@ func (s *Server) editAllow(now time.Time, a action) error {
 			c.AppRules[a.App] = *al
 		}
 	})
-	return nil
 }
 
 func (s *Server) setRule(now time.Time, a action) error {
@@ -572,13 +590,12 @@ func (s *Server) setRule(now time.Time, a action) error {
 		// A rule that allows nothing would keep the app frozen forever; start from the shared list.
 		rule = s.G.Snapshot(now).Config.Allow
 	}
-	s.G.Update(now, func(c *config.Config) {
+	return s.G.Update(now, func(c *config.Config) {
 		if c.AppRules == nil {
 			c.AppRules = map[string]config.Allow{}
 		}
 		c.AppRules[a.App] = rule
 	})
-	return nil
 }
 
 func (s *Server) settings(now time.Time, raw json.RawMessage) error {
@@ -596,7 +613,7 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 		}
 	}
 	allowedStrings := map[string][]string{
-		"dns_check": {"warn", "block", "off"}, "menubar": {"ip", "country", "icon"}, "language": {"auto", "ru", "en"},
+		"dns_check": {"warn", "block", "off"}, "menubar": {"ip", "country", "icon"}, "language": {"auto", "ru", "en"}, "theme": {"auto", "light", "dark"},
 	}
 	for key, allowed := range allowedStrings {
 		if value, exists := m[key]; exists {
@@ -613,7 +630,7 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 			}
 		}
 	}
-	for _, key := range []string{"check_interval", "min_agree"} {
+	for _, key := range []string{"check_interval", "domain_check_interval", "min_agree"} {
 		if v, exists := m[key]; exists {
 			if _, ok := v.(float64); !ok {
 				return errors.New("bad " + key)
@@ -627,7 +644,7 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 		}
 		return max(int(f), min), true
 	}
-	s.G.Update(now, func(c *config.Config) {
+	err := s.G.Update(now, func(c *config.Config) {
 		if v, ok := m["ip_unavailable_action"].(string); ok {
 			c.IPUnavailableAction = config.FailureAction(v)
 		}
@@ -636,6 +653,9 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 		}
 		if n, ok := num("check_interval", 3); ok {
 			c.CheckInterval = config.Duration(time.Duration(n) * time.Second)
+		}
+		if n, ok := num("domain_check_interval", 3); ok {
+			c.DomainCheckInterval = config.Duration(time.Duration(n) * time.Second)
 		}
 		if n, ok := num("min_agree", 1); ok {
 			c.MinAgree = n
@@ -654,13 +674,17 @@ func (s *Server) settings(now time.Time, raw json.RawMessage) error {
 					c.DNSCheck = v
 				case "menubar":
 					c.MenuBar = v
+				case "theme":
+					c.Theme = v
 				case "language":
 					c.Language = v
-					Lang = app.Language(v)
-					config.CommentLang = Lang
 				}
 			}
 		}
 	})
-	return nil
+	if v, ok := m["language"].(string); err == nil && ok {
+		Lang = app.Language(v)
+		config.CommentLang = Lang
+	}
+	return err
 }

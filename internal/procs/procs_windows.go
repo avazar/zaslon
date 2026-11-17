@@ -30,14 +30,16 @@ type cached struct {
 	created            int64
 	path, args, script string
 	argsRead           bool
+	control            controlRole
 }
 
 type osController struct {
 	mu    sync.Mutex
 	cache map[int]cached
+	own   string
 }
 
-func New() Controller { return &osController{cache: map[int]cached{}} }
+func New() Controller { return &osController{cache: map[int]cached{}, own: executablePath()} }
 
 func (c *osController) List() ([]Proc, error) {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
@@ -68,6 +70,7 @@ func (c *osController) List() ([]Proc, error) {
 			delete(c.cache, pid)
 		}
 	}
+	markPanelMembers(out)
 	return out, nil
 }
 
@@ -113,6 +116,14 @@ func (c *osController) processInfo(e windows.ProcessEntry32) Proc {
 		}
 		p.Args, p.ScriptPath = ce.args, ce.script
 	}
+	if sameExecutable(p.Path, c.own) {
+		if line, err := queryProcessCommandLine(h); err == nil {
+			if argv, err := windows.DecomposeCommandLine(line); err == nil {
+				ce.control = ownRole(p.Path, c.own, argv)
+			}
+		}
+	}
+	p.control, p.Control = ce.control, ce.control != notControl && p.Created != ""
 	c.cache[p.PID] = ce
 	return p
 }

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
@@ -188,11 +189,13 @@ func cli(args []string) error {
 		if cfg, err = config.Parse(data); err != nil {
 			return fmt.Errorf("%s: %w", app.ConfigPath(), err)
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s: %w", app.ConfigPath(), err)
 	}
 	setupLang(cfg)
 	switch args[0] {
 	case "status":
-		return status()
+		return status(cfg, os.Stdout)
 	case "allow":
 		return allow(cfg, args[1:])
 	case "config":
@@ -224,7 +227,7 @@ const usage = `Zaslon - kill switch for apps: freezes them when your network or 
 
   zaslon                 start in the menu bar / tray
   zaslon status          current IP, country and state
-  zaslon allow           allow the current IP
+  zaslon allow           allow only the current IPv4
   zaslon allow 1.2.3.4   allow an IP or a subnet (1.2.3.0/24)
   zaslon allow NL        allow a country
   zaslon config          print the config file path
@@ -237,34 +240,53 @@ const usage = `Zaslon - kill switch for apps: freezes them when your network or 
 https://github.com/avazar/zaslon
 `
 
-func status() error {
+func status(cfg *config.Config, out io.Writer) error {
+	s, err := app.ReadState()
+	if err == nil && processAlive(s.PID) && time.Since(s.Updated) < 24*time.Hour {
+		fmt.Fprintln(out, "Zaslon: ", s.Line)
+		fmt.Fprintln(out, "Last guard measurement:")
+		if !s.MeasuredAt.IsZero() {
+			fmt.Fprintln(out, "Checked:", s.MeasuredAt.Local().Format(time.RFC3339))
+		} else {
+			fmt.Fprintln(out, "Checked: unknown")
+		}
+		if s.IP == "" {
+			fmt.Fprintln(out, "IPv4:    unknown")
+		} else {
+			if s.Country == "" && s.DomainCountry != "" {
+				fmt.Fprintln(out, "IPv4:   ", ui.IPWithCountry(s.IP, s.DomainCountry), "(from service checks)")
+			} else {
+				fmt.Fprintln(out, "IPv4:   ", ui.IPWithCountry(s.IP, s.Country))
+			}
+		}
+		if s.IP6 != "" {
+			fmt.Fprintln(out, "IPv6:   ", ui.IPWithCountry(s.IP6, s.Country6))
+		}
+		if len(s.Apps) > 0 {
+			fmt.Fprintln(out, "Apps:   ", strings.Join(s.Apps, ", "))
+		}
+		fmt.Fprintln(out, "Config: ", app.ConfigPath())
+		return nil
+	}
+	fmt.Fprintln(out, "Zaslon:  not running")
+	fmt.Fprintln(out, "Standalone IP measurement using the configured services:")
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	geo := netwatch.NewGeo()
-	measured := currentIPs(ctx, config.DefaultIPServices, config.DefaultIPv6Services, true)
+	measured := currentIPs(ctx, cfg.IPServices, cfg.IPv6Services, cfg.CheckIPv6)
 	r, err := measured.v4, measured.err4
 	if err != nil {
-		fmt.Println("IP:      -", "(offline)")
+		fmt.Fprintln(out, "IPv4:    unknown")
 	} else {
-		fmt.Println("IP:     ", ui.IPWithCountry(r.IP, geo.Country(ctx, r.IP, 4*time.Second)))
+		fmt.Fprintln(out, "IP:     ", ui.IPWithCountry(r.IP, geo.Country(ctx, r.IP, 4*time.Second)))
 		if len(r.Others) > 0 {
-			fmt.Println("         other services say:", strings.Join(r.Others, ", "))
+			fmt.Fprintln(out, "         other services say:", strings.Join(r.Others, ", "))
 		}
 	}
 	if r6, err := measured.v6, measured.err6; err == nil {
-		fmt.Println("IPv6:   ", ui.IPWithCountry(r6.IP, geo.Country(ctx, r6.IP, 4*time.Second)))
+		fmt.Fprintln(out, "IPv6:   ", ui.IPWithCountry(r6.IP, geo.Country(ctx, r6.IP, 4*time.Second)))
 	}
-	s, err := app.ReadState()
-	running := err == nil && processAlive(s.PID) && time.Since(s.Updated) < 24*time.Hour
-	if !running {
-		fmt.Println("Zaslon:  not running")
-	} else {
-		fmt.Println("Zaslon: ", s.Line)
-		if len(s.Apps) > 0 {
-			fmt.Println("Apps:   ", strings.Join(s.Apps, ", "))
-		}
-	}
-	fmt.Println("Config: ", app.ConfigPath())
+	fmt.Fprintln(out, "Config: ", app.ConfigPath())
 	return nil
 }
 
@@ -300,17 +322,16 @@ func allow(cfg *config.Config, args []string) error {
 	case len(args) == 0:
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		measured := currentIPs(ctx, cfg.IPServices, cfg.IPv6Services, cfg.CheckIPv6)
+		measured := currentIPs(ctx, cfg.IPServices, cfg.IPv6Services, false)
 		r, err := measured.v4, measured.err4
 		if err != nil {
 			return errors.New("no internet - nothing to allow")
 		}
+		if !r.Confirmed(cfg.Need()) {
+			return fmt.Errorf("IPv4 not confirmed: %d of %d required votes, conflicting addresses: %v", r.Votes, cfg.Need(), r.Others)
+		}
 		cfg.Allow.AddIP(r.IP)
 		what = r.IP
-		if r6, err := measured.v6, measured.err6; err == nil && cfg.CheckIPv6 {
-			cfg.Allow.AddIP(r6.IP)
-			what += ", " + r6.IP
-		}
 	case len(args[0]) == 2 && !strings.ContainsAny(args[0], ".:/"):
 		cfg.Allow.AddCountry(args[0])
 		what = strings.ToUpper(args[0])

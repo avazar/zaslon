@@ -14,7 +14,11 @@ import (
 // appends a line to a file every 20 ms until killed.
 func TestMain(m *testing.M) {
 	if f := os.Getenv("ZASLON_HELPER"); f != "" {
+		deadline := time.Now().Add(2 * time.Minute)
 		for i := 0; ; i++ {
+			if time.Now().After(deadline) {
+				os.Exit(0)
+			}
 			fh, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err == nil {
 				fmt.Fprintln(fh, i)
