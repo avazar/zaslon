@@ -30,6 +30,7 @@ param([string]$Version,[string]$InstallDirectory,[string]$ProfileDirectory,
 function Invoke-RestMethod {
     param([string]$Uri, [int]$TimeoutSec)
     $script:bootstrapFixture.Requests.Add($Uri)
+    if ($Uri -eq 'https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1') { return $bootstrapText }
     if ($Uri -ne 'https://raw.githubusercontent.com/avazar/zaslon/dev/INSTALL_VERSION') { throw "Unexpected request: $Uri" }
     if ($script:bootstrapFixture.Mode -eq 'invalid-version') { return '../../outside' }
     return $script:bootstrapFixture.Version
@@ -69,7 +70,7 @@ try {
     $capture = Get-Content -LiteralPath $env:ZASLON_BOOTSTRAP_TEST_CAPTURE -Raw | ConvertFrom-Json
     Assert-Bootstrap ($capture.NoStart -and $capture.NoShortcut -and $capture.Headless -and $capture.PackagePath -eq $forward.PackagePath -and $capture.ProfileDirectory -eq $forward.ProfileDirectory) 'Installer arguments were not preserved.'
     Assert-Bootstrap ($script:bootstrapFixture.Requests.Count -eq 2) 'Explicit version unexpectedly read the default version.'
-    & ([scriptblock]::Create($bootstrapText)) -Uninstall
+    [IO.File]::ReadAllText((Join-Path $testRepo 'uninstall.ps1')) | Invoke-Expression
     $capture = Get-Content -LiteralPath $env:ZASLON_BOOTSTRAP_TEST_CAPTURE -Raw | ConvertFrom-Json
     Assert-Bootstrap $capture.Uninstall 'Uninstall was not forwarded.'
     foreach ($mode in @('invalid-version','tampered','duplicate','missing','partial-download')) {

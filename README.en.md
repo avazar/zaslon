@@ -54,7 +54,7 @@ If you used the installer, quit Zaslon from its tray or menu bar icon and run th
 **Windows (PowerShell)**
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1))) -Uninstall
+irm https://raw.githubusercontent.com/avazar/zaslon/dev/uninstall.ps1 | iex
 ```
 
 **Linux and macOS (terminal)**
