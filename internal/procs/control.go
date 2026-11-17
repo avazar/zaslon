@@ -40,9 +40,13 @@ func sameExecutable(a, b string) bool {
 // Only this executable in one of its exact long-running control modes qualifies.
 // A name, a substring in arguments, or an arbitrary descendant is not sufficient.
 func ownRole(path, own string, argv []string) controlRole {
-	if !sameExecutable(path, own) || len(argv) == 0 {
+	if !sameExecutable(path, own) {
 		return notControl
 	}
+	return controlMode(argv)
+}
+
+func controlMode(argv []string) controlRole {
 	if len(argv) == 1 || (len(argv) == 2 && argv[1] == "headless") {
 		return guardControl
 	}

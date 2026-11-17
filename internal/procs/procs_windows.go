@@ -30,6 +30,7 @@ type cached struct {
 	created            int64
 	path, args, script string
 	argsRead           bool
+	ownImage           bool
 	control            controlRole
 }
 
@@ -100,6 +101,15 @@ func (c *osController) processInfo(e windows.ProcessEntry32) Proc {
 		n := uint32(len(buf))
 		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil {
 			ce.path = windows.UTF16ToString(buf[:n])
+			ce.ownImage = sameExecutable(ce.path, c.own)
+			if !ce.ownImage {
+				// Windows can report the 8.3 spelling used to launch the image.
+				// Expand it for identity comparison only; app rules use ce.path.
+				n, err := windows.GetLongPathName(&buf[0], &buf[0], uint32(len(buf)))
+				if err == nil && n > 0 && n < uint32(len(buf)) {
+					ce.ownImage = sameExecutable(windows.UTF16ToString(buf[:n]), c.own)
+				}
+			}
 		}
 	}
 	p.Path = ce.path
@@ -116,10 +126,10 @@ func (c *osController) processInfo(e windows.ProcessEntry32) Proc {
 		}
 		p.Args, p.ScriptPath = ce.args, ce.script
 	}
-	if sameExecutable(p.Path, c.own) {
+	if ce.ownImage {
 		if line, err := queryProcessCommandLine(h); err == nil {
 			if argv, err := windows.DecomposeCommandLine(line); err == nil {
-				ce.control = ownRole(p.Path, c.own, argv)
+				ce.control = controlMode(argv)
 			}
 		}
 	}

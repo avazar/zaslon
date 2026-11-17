@@ -29,10 +29,10 @@ func fixtureJob(t *testing.T) windows.Handle {
 	return job
 }
 
-func controlFixture(t *testing.T, job windows.Handle, mode string) (*exec.Cmd, string) {
+func controlFixture(t *testing.T, job windows.Handle, exe, mode string) (*exec.Cmd, string) {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "heartbeat")
-	cmd := exec.Command(os.Args[0], mode)
+	cmd := exec.Command(exe, mode)
 	cmd.Env = append(os.Environ(), "ZASLON_HELPER="+file)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
@@ -60,10 +60,21 @@ func controlFixture(t *testing.T, job windows.Handle, mode string) (*exec.Cmd, s
 
 func TestPrivatePanelJobExemptsOnlyItsOwnProcesses(t *testing.T) {
 	bounded := fixtureJob(t)
-	owner, _ := controlFixture(t, bounded, "panel")
-	worker, _ := controlFixture(t, bounded, "headless")
-	member, memberFile := controlFixture(t, bounded, "ordinary-fixture")
-	user, userFile := controlFixture(t, bounded, "ordinary-fixture")
+	// Exercise both spellings on volumes that provide DOS short names.
+	exe := executablePath()
+	path, err := windows.UTF16PtrFromString(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	panelExe := exe
+	if n, err := windows.GetShortPathName(path, &buf[0], uint32(len(buf))); err == nil && n > 0 && n < uint32(len(buf)) {
+		panelExe = windows.UTF16ToString(buf[:n])
+	}
+	owner, _ := controlFixture(t, bounded, panelExe, "panel")
+	worker, _ := controlFixture(t, bounded, exe, "headless")
+	member, memberFile := controlFixture(t, bounded, exe, "ordinary-fixture")
+	user, userFile := controlFixture(t, bounded, exe, "ordinary-fixture")
 	c := New()
 	all, err := c.List()
 	if err != nil {
@@ -79,8 +90,10 @@ func TestPrivatePanelJobExemptsOnlyItsOwnProcesses(t *testing.T) {
 		return Proc{}
 	}
 	ownerProc := find(all, owner.Process.Pid)
-	if !ownerProc.Control || !find(all, worker.Process.Pid).Control {
-		t.Fatal("own panel/supervisor were not identified")
+	workerProc := find(all, worker.Process.Pid)
+	if ownerProc.control != panelControl || workerProc.control != guardControl {
+		t.Fatalf("own executable %q: panel %q role=%d, supervisor %q role=%d",
+			c.(*osController).own, ownerProc.Path, ownerProc.control, workerProc.Path, workerProc.control)
 	}
 	panelJob, err := createPanelJob(ownerProc)
 	if err != nil {
