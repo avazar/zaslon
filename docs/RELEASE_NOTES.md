@@ -5,7 +5,7 @@
 
 **Установка:** [Windows](https://github.com/avazar/zaslon/blob/dev/README.md#установка-на-windows)
 или [Linux/macOS](https://github.com/avazar/zaslon/blob/dev/README.md#установка-на-linux-и-macos).
-В README также описаны первый запуск, обновление, удаление и восстановление.
+В README также описаны первая настройка и удаление.
 
 Пакеты собираются для Windows amd64/arm64, Linux amd64/arm64 и macOS universal.
 В каждый входят приложение, независимая утилита восстановления, лицензия,
