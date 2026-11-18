@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/avazar/zaslon/internal/config"
+	"github.com/avazar/zaslon/internal/procs"
 )
 
 func domainEvents(events []Event) []Event {
@@ -16,6 +17,57 @@ func domainEvents(events []Event) []Event {
 		}
 	}
 	return out
+}
+
+func TestSharedFailureFoldsUntilRecovery(t *testing.T) {
+	h := domainHarness(t)
+	c := h.g.cfg.Clone()
+	c.DomainChecks["cursor"] = []string{claudeEndpoint}
+	h.g.SetConfig(h.now, c)
+	r := domainReply(h, "", "")
+	for app, results := range r.Domains {
+		results[0].Endpoint = claudeEndpoint
+		results[0].Error = "HTTP 403"
+		r.Domains[app] = results
+	}
+	h.probeFull(r)
+	first := domainEvents(h.g.Snapshot(h.now).History)
+	if len(first) != 1 || len(first[0].Apps) != 2 || len(first[0].Problems) != 1 {
+		t.Fatalf("shared result was not reported once: %+v", first)
+	}
+	h.now = h.now.Add(time.Second)
+	for _, results := range r.Domains {
+		results[0].CheckedAt = h.now
+	}
+	h.probeFull(r)
+	episodes := domainEvents(h.g.Snapshot(h.now).History)
+	if len(episodes) != 1 || episodes[0].Repeats != 1 || episodes[0].ID != first[0].ID || episodes[0].FirstAt != first[0].At || episodes[0].At != h.now {
+		t.Fatalf("lost repeat or start of incident: %+v", episodes)
+	}
+	success := domainReply(h, "203.0.113.10", "203.0.113.10")
+	success.Domains["cursor"][0].Endpoint = claudeEndpoint
+	h.probeFull(success)
+	h.probeFull(r)
+	episodes = domainEvents(h.g.Snapshot(h.now).History)
+	if len(episodes) != 2 || episodes[1].Repeats != 0 || episodes[1].ID == first[0].ID {
+		t.Fatalf("a new incident folded into the resolved one: %+v", episodes)
+	}
+}
+
+func TestReleaseDurationUsesOnlyKnownProcessIdentities(t *testing.T) {
+	now := time.Now()
+	g := Guard{pauseStarts: map[int]pauseStart{1: {"first", now.Add(-time.Minute)}, 2: {"second", now.Add(-time.Second)}}}
+	var e Event
+	g.releaseDuration(now, []procs.Proc{{PID: 1, Created: "first"}, {PID: 2, Created: "second"}}, &e)
+	if e.PauseMin != time.Second || e.PauseMax != time.Minute || len(g.pauseStarts) != 0 {
+		t.Fatal(e, g.pauseStarts)
+	}
+	g.pauseStarts[1] = pauseStart{"first", now.Add(-time.Hour)}
+	e = Event{}
+	g.releaseDuration(now, []procs.Proc{{PID: 1, Created: "new"}}, &e)
+	if e.PauseMax != 0 {
+		t.Fatal("reused PID inherited a pause duration")
+	}
 }
 
 func TestDomainDiagnosticsKeepExactFailureAfterRecovery(t *testing.T) {
@@ -31,9 +83,8 @@ func TestDomainDiagnosticsKeepExactFailureAfterRecovery(t *testing.T) {
 	if len(events) != 1 || events[0].Notify || strings.Join(events[0].Apps, ",") != "Claude" {
 		t.Fatalf("wrong diagnostic events: %+v", events)
 	}
-	text := strings.Join(events[0].Details, " | ")
-	if !strings.Contains(text, second+" IPv4: HTTP 403") || strings.Contains(text, claudeEndpoint+" IPv4:") || !strings.Contains(text, "check=") {
-		t.Fatal(text)
+	if len(events[0].Problems) != 1 || events[0].Problems[0] != (CheckProblem{second, "IPv4", "http", "HTTP 403"}) || events[0].CheckID == 0 {
+		t.Fatal(events[0])
 	}
 	if !h.p.frozen[100] || h.p.frozen[200] {
 		t.Fatal("diagnostics changed independent app gating")
@@ -42,7 +93,7 @@ func TestDomainDiagnosticsKeepExactFailureAfterRecovery(t *testing.T) {
 	// because the freeze has already been announced.
 	r.Domains["claude"][1].Error = "context deadline exceeded"
 	h.probeFull(r)
-	if got := domainEvents(h.events); len(got) != 2 || !strings.Contains(strings.Join(got[1].Details, " "), "context deadline exceeded") {
+	if got := domainEvents(h.events); len(got) != 2 || got[1].Problems[0].Info != "context deadline exceeded" {
 		t.Fatalf("lost second error: %+v", got)
 	}
 	r.Domains["claude"][1].Error, r.Domains["claude"][1].IP = "", "203.0.113.10"
@@ -50,7 +101,7 @@ func TestDomainDiagnosticsKeepExactFailureAfterRecovery(t *testing.T) {
 	if h.p.frozen[100] {
 		t.Fatal("fresh success did not resume")
 	}
-	if got := domainEvents(h.g.Snapshot(h.now).History); len(got) != 2 || !strings.Contains(strings.Join(got[0].Details, " "), "HTTP 403") {
+	if got := domainEvents(h.g.Snapshot(h.now).History); len(got) != 2 || got[0].Problems[0].Info != "HTTP 403" {
 		t.Fatalf("recovery erased failure history: %+v", got)
 	}
 }
@@ -71,9 +122,9 @@ func TestDomainDiagnosticsAlsoRecordIgnoredFailures(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("diagnostics: %+v", events)
 	}
-	text := strings.Join(events[0].Details, " ")
-	if !strings.Contains(text, "IPv4: DNS lookup failed") || !strings.Contains(text, "IPv6: IPv6 timeout") {
-		t.Fatal(text)
+	ps := events[0].Problems
+	if len(ps) != 2 || ps[0].Family != "IPv4" || ps[0].Info != "DNS lookup failed" || ps[1].Family != "IPv6" || ps[1].Info != "IPv6 timeout" {
+		t.Fatal(ps)
 	}
 }
 
@@ -96,13 +147,13 @@ func TestDomainDiagnosticsExplainAbsentAndMalformedResults(t *testing.T) {
 			switch mode {
 			case "missing":
 				delete(r.Domains, "claude")
-				want = "no measurement returned"
+				want = "missing"
 			case "duplicate":
 				r.Domains["claude"] = append(r.Domains["claude"], r.Domains["claude"][0])
-				want = "duplicate measurement"
+				want = "duplicate"
 			case "unexpected":
 				r.Domains["claude"] = append(r.Domains["claude"], DomainResult{Endpoint: "https://unexpected.example/cdn-cgi/trace", IP: "203.0.113.10", CheckedAt: h.now})
-				want = "unexpected measurement endpoint"
+				want = "unexpected"
 			}
 			h.probeFull(r)
 			events := domainEvents(h.events)
@@ -112,7 +163,7 @@ func TestDomainDiagnosticsExplainAbsentAndMalformedResults(t *testing.T) {
 				}
 				return
 			}
-			if len(events) != 1 || !strings.Contains(strings.Join(events[0].Details, " "), want) {
+			if len(events) != 1 || len(events[0].Problems) == 0 || events[0].Problems[0].Code != want {
 				t.Fatalf("missing %q: %+v", want, events)
 			}
 		})
@@ -125,7 +176,7 @@ func TestExpiredDomainFreezeExplainsMissingProof(t *testing.T) {
 	h.events = nil
 	h.step(DomainMaxAge)
 	for _, e := range h.events {
-		if e.Kind == EvDomainCheck && h.p.frozen[100] && strings.Contains(strings.Join(e.Details, " "), claudeEndpoint+": measurement expired") {
+		if e.Kind == EvDomainCheck && h.p.frozen[100] && len(e.Problems) > 0 && e.Problems[0].Endpoint == claudeEndpoint && e.Problems[0].Code == "expired" {
 			return
 		}
 	}

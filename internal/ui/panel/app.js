@@ -452,7 +452,11 @@ function stats() {
 
 function history() {
   if (!S.history || !S.history.length) return `<div class="card pad empty">${t("history_empty")}</div>`;
-  return `<div class="card list hist">${S.history.map((h) => `<div class="item"><span class="dot ${esc(h.kind)}"></span><span class="time">${esc(h.date)} ${esc(h.time)}</span><span class="selectable">${esc(h.text)}</span></div>`).join("")}</div>`;
+  return `<div class="card list hist">${S.history.map((h) => {
+    const row = `<span class="dot ${esc(h.kind)}" aria-hidden="true"></span><span class="time">${esc(h.date)} ${esc(h.time)}</span><span class="hist-body selectable">${esc(h.text)}</span>`;
+    if (!h.details?.length) return `<div class="hist-row">${row}</div>`;
+    return `<details data-event="${esc(h.id)}"><summary class="hist-row">${row}</summary><ul class="selectable">${h.details.map(d => `<li>${esc(d)}</li>`).join("")}</ul></details>`;
+  }).join("")}</div>`;
 }
 
 function toggleSet(key, title, desc, value) {
@@ -515,7 +519,15 @@ function render() {
   const main = document.getElementById("main");
   main.dataset.page = page;
   const keep = main.scrollTop;
+  const expanded = page === "history" ? new Set(Array.from(main.querySelectorAll("details[data-event][open]"), el => el.dataset.event)) : null;
+  const focused = page === "history" && document.activeElement?.closest("details[data-event]")?.dataset.event;
   main.innerHTML = `<div class="page"><h1>${t(page)}</h1><p class="lead">${t("lead_" + page) === "lead_" + page ? "" : t("lead_" + page)}</p>${RENDER[page]()}</div>`;
+  if (expanded) {
+    for (const el of main.querySelectorAll("details[data-event]")) {
+      el.open = expanded.has(el.dataset.event);
+      if (el.dataset.event === focused) el.querySelector("summary").focus({preventScroll:true});
+    }
+  }
   main.scrollTop = keep;
 }
 

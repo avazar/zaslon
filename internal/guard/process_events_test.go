@@ -27,6 +27,12 @@ func TestParentPolicyHoldAndReleaseAreLoggedOncePerBatch(t *testing.T) {
 				if e.Reason != ProcessPolicyDenied || !slices.Contains(e.Details, "processes=2") {
 					t.Fatalf("incorrect child operation: %+v", e)
 				}
+				if kind == EvFrozen && !slices.Contains(e.HeldBy, "Claude") {
+					t.Fatalf("missing parent policy: %+v", e)
+				}
+				if kind == EvResumed && (e.PauseMin < time.Second || e.PauseMax > time.Second+time.Millisecond) {
+					t.Fatalf("wrong duration of the inherited pause: %+v", e)
+				}
 			}
 		}
 		if batches != 1 {

@@ -284,12 +284,15 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 		}
 		apps = append(apps, a)
 	}
-	var hist []map[string]string
+	var hist []map[string]any
 	for i := len(snap.History) - 1; i >= 0; i-- {
 		e := snap.History[i]
-		line := EventLine(e)
-		hist = append(hist, map[string]string{"time": e.At.Local().Format("15:04:05"), "date": e.At.Local().Format("02.01"),
-			"text": strings.TrimSpace(line[strings.Index(line, " ")+1:]), "kind": eventKind(e.Kind)})
+		details := eventDetails(e)
+		if e.Repeats > 0 {
+			details = append(details, e.FirstAt.Local().Format("02.01 15:04:05")+" → "+e.At.Local().Format("02.01 15:04:05"))
+		}
+		hist = append(hist, map[string]any{"id": e.ID, "time": e.At.Local().Format("15:04:05"), "date": e.At.Local().Format("02.01"),
+			"text": eventMessage(e, false), "details": details, "kind": eventKind(e.Kind)})
 	}
 	var trusted []map[string]any
 	for _, n := range cfg.TrustedNetworks {

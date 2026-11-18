@@ -71,6 +71,12 @@ func traceIP(parent context.Context, endpoint string, timeout time.Duration, v6 
 	req.Header.Set("Cache-Control", "no-cache, no-store")
 	resp, err := c.Do(req)
 	if err != nil {
+		// The measurement already identifies the endpoint. Keep the transport
+		// cause (including its timeout identity) without quoting the URL twice.
+		var requestErr *url.Error
+		if errors.As(err, &requestErr) {
+			return TraceResult{}, requestErr.Err
+		}
 		return TraceResult{}, err
 	}
 	defer resp.Body.Close()

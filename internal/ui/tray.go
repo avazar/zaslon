@@ -369,8 +369,7 @@ func (t *Tray) render(s guard.Snapshot, evs []guard.Event) {
 	cfg := s.Config
 
 	for _, e := range evs {
-		line := EventLine(e)
-		app.Logf("%s", line[strings.Index(line, " ")+2:])
+		app.LogAt(e.At, logMessage(e))
 		if title, body, ok := Notification(e); ok && cfg.Notifications {
 			app.Notify(title, body)
 		}
@@ -466,7 +465,8 @@ func (t *Tray) applyMenu() {
 		j := len(s.History) - 1 - i
 		title := ""
 		if j >= 0 {
-			title = EventLine(s.History[j])
+			e := s.History[j]
+			title = e.At.Local().Format("15:04:05") + "  " + eventMessage(e, false)
 		} else if i == 0 {
 			title = T("history.empty")
 		}
@@ -580,9 +580,9 @@ func (t *Tray) setIcon(s guard.Snapshot) {
 // HeadlessRender logs and notifies without a tray icon (zaslon headless).
 func HeadlessRender(s guard.Snapshot, evs []guard.Event) {
 	for _, e := range evs {
-		line := EventLine(e)
-		fmt.Println(line)
-		app.Logf("%s", line[strings.Index(line, " ")+2:])
+		message := logMessage(e)
+		fmt.Println(e.At.Local().Format("15:04:05"), message)
+		app.LogAt(e.At, message)
 		if title, body, ok := Notification(e); ok && s.Config.Notifications {
 			app.Notify(title, body)
 		}

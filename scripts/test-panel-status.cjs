@@ -7,6 +7,27 @@ const { join } = require("node:path");
 
 const app = readFileSync(join(__dirname, "../internal/ui/panel/app.js"), "utf8");
 
+test("history keeps raw diagnostics inside escaped, initially closed details", async () => {
+  const main = { dataset: {}, scrollTop: 0, querySelectorAll: () => [] };
+  const elements = { main, nav: {}, ver: {}, "dark-theme": {} };
+  const state = {
+    lang: "ru", apps: [], history: [
+      { id: 3, kind: "ok", text: "Возобновлено · пауза 12 с", details: ["processes=2 <test>"] },
+      { id: 2, kind: "warn", text: "Сеть изменилась" },
+    ],
+  };
+  const ctx = vm.createContext({
+    document: { documentElement: {}, getElementById: name => elements[name], addEventListener() {} },
+    location: { hash: "#history" }, window: { addEventListener() {} }, setInterval() {},
+    fetch: async () => ({ ok: true, text: async () => JSON.stringify(state), json: async () => [] }),
+  });
+  await vm.runInContext(app, ctx);
+  assert.match(main.innerHTML, /<details data-event="3"><summary class="hist-row">[^]*?Возобновлено · пауза 12 с<\/span><\/summary>/);
+  assert.doesNotMatch(main.innerHTML, /Подробности|Details/);
+  assert.match(main.innerHTML, /<li>processes=2 &lt;test&gt;<\/li>/);
+  assert.equal(main.innerHTML.match(/<details/g).length, 1);
+});
+
 test("overview follows actual suspension and release while a control keeps focus", async () => {
   const details = { ".orb": {}, ".title": {}, ".sub": {} };
   const hero = { querySelector: (name) => details[name] };

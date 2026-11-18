@@ -605,10 +605,10 @@ func scenario(repo string, result *report) (err error) {
 		}
 		freezeA, resumeB := false, false
 		for _, line := range strings.Split(string(data[len(beforeSwitch):]), "\n") {
-			if strings.Contains(line, "Frozen (") && strings.Contains(line, "): fixture-a | ") && strings.Contains(line, "processes=2") {
+			if strings.Contains(line, "Paused · fixture-a ·") && strings.Contains(line, "processes=2") {
 				freezeA = true
 			}
-			if strings.Contains(line, "Resumed: fixture-b | processes=2") {
+			if strings.Contains(line, "Resumed: fixture-b") && strings.Contains(line, "paused for ") && strings.Contains(line, "processes=2") {
 				resumeB = true
 			}
 		}
@@ -632,7 +632,7 @@ func scenario(repo string, result *report) (err error) {
 			return false
 		}
 		for _, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(line, "Service check: fixture-b") && strings.Contains(line, sb.URL+"/cdn-cgi/trace IPv4: HTTP 403") {
+			if strings.Contains(line, "Service check: fixture-b") && strings.Contains(line, sb.URL+"/cdn-cgi/trace IPv4") && strings.Contains(line, "HTTP 403") {
 				return true
 			}
 		}
@@ -710,7 +710,7 @@ func scenario(repo string, result *report) (err error) {
 			return false
 		}
 		for _, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(line, "Service check: fixture-a") && strings.Contains(line, sa.URL+"/cdn-cgi/trace IPv4: HTTP 403") {
+			if strings.Contains(line, "Service check: fixture-a") && strings.Contains(line, sa.URL+"/cdn-cgi/trace IPv4") && strings.Contains(line, "HTTP 403") {
 				return true
 			}
 		}

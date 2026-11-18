@@ -87,6 +87,8 @@ func TestTraceRejectsFailuresWithoutFollowingRedirects(t *testing.T) {
 			})
 			if got, err := traceIP(context.Background(), s.URL, 150*time.Millisecond, false, nil, nil); err == nil || got.IP != "" {
 				t.Fatalf("accepted %s: %+v %v", mode, got, err)
+			} else if mode == "timeout" && (!errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), s.URL)) {
+				t.Fatalf("expected a typed timeout without a redundant endpoint: %v", err)
 			}
 		})
 	}

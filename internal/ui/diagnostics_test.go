@@ -11,6 +11,31 @@ import (
 	"github.com/avazar/zaslon/internal/guard"
 )
 
+func TestHistorySummaryAndFullLogUseTheSameMeasurement(t *testing.T) {
+	oldLang := Lang
+	t.Cleanup(func() { Lang = oldLang })
+	Lang = "ru"
+	const endpoint = "https://service.example/cdn-cgi/trace"
+	e := guard.Event{Kind: guard.EvDomainCheck, Apps: []string{"Claude", "Codex"}, CheckID: 42,
+		Problems: []guard.CheckProblem{{Endpoint: endpoint, Family: "IPv6", Code: "timeout", Info: "context deadline exceeded"}}}
+	short, full := eventMessage(e, false), logMessage(e)
+	if !strings.Contains(short, "Claude, Codex") || !strings.Contains(short, "service.example IPv6") || !strings.Contains(short, "тайм-аут") || strings.Contains(short, "/trace") || strings.Contains(short, "deadline") {
+		t.Fatal(short)
+	}
+	if strings.Count(full, endpoint) != 1 || !strings.Contains(full, "check=42") || !strings.Contains(strings.Join(eventDetails(e), " "), "context deadline exceeded") {
+		t.Fatal(full, eventDetails(e))
+	}
+	e.Kind, e.Reason = guard.EvFrozen, guard.DomainIPNotAllowed
+	if !strings.Contains(eventMessage(e, false), reasonText(guard.DomainIPNotAllowed)) {
+		t.Fatal("a later timeout obscured a known denial")
+	}
+	e = guard.Event{Kind: guard.EvResumed, Apps: []string{"Codex"}, ReleaseCause: "protection paused", PauseMin: time.Minute, PauseMax: time.Minute}
+	short = eventMessage(e, false)
+	if !strings.Contains(short, "1 мин") || strings.Contains(short, T("hist.verified")) {
+		t.Fatal(short)
+	}
+}
+
 func TestDiagnosticEventsReachHistoryAndPersistentLog(t *testing.T) {
 	t.Setenv("ZASLON_DIR", t.TempDir())
 	oldLang := Lang

@@ -20,19 +20,55 @@ var Lang = "ru"
 
 var msgs = map[string]map[string]string{
 	"ru": {
-		"checks.ignored":          "Приложения работают: недоступные проверки игнорируются",
-		"reason.v6conflict":       "Сервисы IPv6 сообщили разные адреса",
-		"ev.resumed.ignored":      "Возобновлено по настройке игнорирования недоступной проверки: %s",
-		"ev.resumed.ignored.b":    "Недоступная проверка проигнорирована по настройке. Разрешённый выход не подтверждён для всех проверок.",
-		"frozen.v6unknown":        "IPv6 не удалось проверить: приложения приостановлены",
-		"reason.v6unknown":        "IPv6 не подтверждён",
-		"domain.timeout":          "Тайм-аут проверки %s (%s)",
-		"domain.unconfirmed":      "Не удалось проверить %s (%s)",
-		"reason.domain_unknown":   "Не удалось проверить внешний IP приложения",
-		"country.domain_source":   "По доменным проверкам",
-		"reason.settings":         "Изменены правила защиты",
-		"reason.country_unknown":  "Страна выхода IPv4 не определена",
-		"reason.country6_unknown": "Страна выхода IPv6 не определена",
+		"hist.pause":                    "Пауза · %s",
+		"hist.held":                     "Всё ещё на паузе · %s",
+		"hist.retry":                    "Повтор проверки · %s",
+		"hist.expired_result":           "Результат проверки устарел. Проверяем соединение заново.",
+		"hist.interrupted":              "Наблюдение прерывалось. Проверяем соединение заново.",
+		"hist.timeout":                  "нет ответа до истечения тайм-аута",
+		"hist.http":                     "сервис вернул %s",
+		"hist.error":                    "не удалось завершить проверку",
+		"hist.dns":                      "не удалось разрешить имя сервиса",
+		"hist.no_address":               "сервис не вернул IP",
+		"hist.country":                  "не удалось определить страну для %s",
+		"hist.denied":                   "адрес %s не разрешён",
+		"hist.no_domains":               "для проверки не задано ни одного домена",
+		"hist.unexpected":               "ответ с неожиданного адреса проверки",
+		"hist.duplicate":                "получен дубликат результата",
+		"hist.missing":                  "результат ещё не получен",
+		"hist.old":                      "результат получен до начала текущей проверки",
+		"hist.future":                   "время результата опережает часы",
+		"hist.expired":                  "истёк срок действия результата",
+		"hist.by":                       "действуют правила приложения %s",
+		"hist.duration":                 "пауза %s",
+		"hist.again":                    "повторов: %d",
+		"hist.repeated":                 "Сбой повторился · %s",
+		"hist.range":                    "пауза процессов от %s до %s",
+		"hist.verified":                 "проверка пройдена",
+		"hist.protection paused":        "защита приостановлена пользователем",
+		"hist.Zaslon exiting":           "выход из Zaslon",
+		"hist.protection removed":       "защита приложения отключена",
+		"hist.control process excluded": "собственный управляющий процесс Zaslon",
+		"hist.process_error":            "Ошибка управления процессом",
+		"hist.freeze_error":             "Не удалось приостановить %s",
+		"hist.resume_error":             "Не удалось возобновить %s",
+		"hist.list_error":               "Не удалось получить список процессов",
+		"hist.monitor_error":            "Ошибка наблюдения за сетью",
+		"hist.journal_error":            "Не удалось сохранить правила восстановления процессов",
+		"hist.retry_timeout":            "тайм-аут, повторяем запрос",
+		"checks.ignored":                "Приложения работают: недоступные проверки игнорируются",
+		"reason.v6conflict":             "Сервисы IPv6 сообщили разные адреса",
+		"ev.resumed.ignored":            "Возобновлено по настройке игнорирования недоступной проверки: %s",
+		"ev.resumed.ignored.b":          "Недоступная проверка проигнорирована по настройке. Разрешённый выход не подтверждён для всех проверок.",
+		"frozen.v6unknown":              "IPv6 не удалось проверить: приложения приостановлены",
+		"reason.v6unknown":              "IPv6 не подтверждён",
+		"domain.timeout":                "Тайм-аут проверки %s (%s)",
+		"domain.unconfirmed":            "Не удалось проверить %s (%s)",
+		"reason.domain_unknown":         "Не удалось проверить внешний IP приложения",
+		"country.domain_source":         "По доменным проверкам",
+		"reason.settings":               "Изменены правила защиты",
+		"reason.country_unknown":        "Страна выхода IPv4 не определена",
+		"reason.country6_unknown":       "Страна выхода IPv6 не определена",
 
 		"ev.resumed.domain.b":   "Выход к %s проверен: %s. Приостановка снята.",
 		"reason.domain_ip":      "IP на домене сервиса не разрешён",
@@ -111,7 +147,7 @@ var msgs = map[string]map[string]string{
 		"ev.frozen.t":        "%s: заморожено",
 		"ev.frozen.ip.b":     "IP %s не разрешён. Приложения останутся на паузе до успешной проверки.",
 		"ev.frozen.off.b":    "Пропал интернет. Приложения останутся на паузе до успешной проверки.",
-		"ev.resumed":         "Разморожено: %s",
+		"ev.resumed":         "Возобновлено · %s",
 		"ev.resumed.t":       "%s: снова работает",
 		"ev.resumed.b":       "IP %s разрешён.",
 		"ev.blocked":         "Закрыто: %s",
@@ -166,19 +202,55 @@ var msgs = map[string]map[string]string{
 		"already.b":          "Значок в строке меню (на Windows - у часов, может прятаться под стрелкой ^).",
 	},
 	"en": {
-		"checks.ignored":          "Apps running: unavailable checks are ignored",
-		"reason.v6conflict":       "IPv6 services returned conflicting addresses",
-		"ev.resumed.ignored":      "Resumed by the unavailable-check policy: %s",
-		"ev.resumed.ignored.b":    "An unavailable check was ignored by your setting. The allowed exit is not confirmed for all checks.",
-		"frozen.v6unknown":        "IPv6 check inconclusive: apps suspended",
-		"reason.v6unknown":        "IPv6 not confirmed",
-		"domain.timeout":          "%s timed out (%s)",
-		"domain.unconfirmed":      "Could not verify %s (%s)",
-		"reason.domain_unknown":   "App’s public IP could not be verified",
-		"country.domain_source":   "From service checks",
-		"reason.settings":         "Protection settings changed",
-		"reason.country_unknown":  "IPv4 exit country unknown",
-		"reason.country6_unknown": "IPv6 exit country unknown",
+		"hist.pause":                    "Paused · %s",
+		"hist.held":                     "Still paused · %s",
+		"hist.retry":                    "Retrying check · %s",
+		"hist.expired_result":           "The check result expired. Checking the connection again.",
+		"hist.interrupted":              "Monitoring was interrupted. Checking the connection again.",
+		"hist.timeout":                  "no response before the timeout",
+		"hist.http":                     "service returned %s",
+		"hist.error":                    "check failed",
+		"hist.dns":                      "DNS lookup failed",
+		"hist.no_address":               "service returned no IP",
+		"hist.country":                  "country unknown for %s",
+		"hist.denied":                   "exit %s is not allowed",
+		"hist.no_domains":               "no domains configured for this check",
+		"hist.unexpected":               "unexpected measurement endpoint",
+		"hist.duplicate":                "duplicate measurement",
+		"hist.missing":                  "no measurement returned",
+		"hist.old":                      "measurement predates the current check",
+		"hist.future":                   "measurement timestamp is in the future",
+		"hist.expired":                  "measurement expired",
+		"hist.by":                       "held by the rules for %s",
+		"hist.duration":                 "paused for %s",
+		"hist.again":                    "repeats: %d",
+		"hist.repeated":                 "Check failed again · %s",
+		"hist.range":                    "processes paused for %s to %s",
+		"hist.verified":                 "check passed",
+		"hist.protection paused":        "protection paused by user",
+		"hist.Zaslon exiting":           "Zaslon is exiting",
+		"hist.protection removed":       "app protection removed",
+		"hist.control process excluded": "Zaslon control process",
+		"hist.process_error":            "Process control failed",
+		"hist.freeze_error":             "Could not pause %s",
+		"hist.resume_error":             "Could not resume %s",
+		"hist.list_error":               "Could not list processes",
+		"hist.monitor_error":            "Network monitoring failed",
+		"hist.journal_error":            "Could not save process recovery policies",
+		"hist.retry_timeout":            "timed out, retrying now",
+		"checks.ignored":                "Apps running: unavailable checks are ignored",
+		"reason.v6conflict":             "IPv6 services returned conflicting addresses",
+		"ev.resumed.ignored":            "Resumed by the unavailable-check policy: %s",
+		"ev.resumed.ignored.b":          "An unavailable check was ignored by your setting. The allowed exit is not confirmed for all checks.",
+		"frozen.v6unknown":              "IPv6 check inconclusive: apps suspended",
+		"reason.v6unknown":              "IPv6 not confirmed",
+		"domain.timeout":                "%s timed out (%s)",
+		"domain.unconfirmed":            "Could not verify %s (%s)",
+		"reason.domain_unknown":         "App’s public IP could not be verified",
+		"country.domain_source":         "From service checks",
+		"reason.settings":               "Protection settings changed",
+		"reason.country_unknown":        "IPv4 exit country unknown",
+		"reason.country6_unknown":       "IPv6 exit country unknown",
 
 		"ev.resumed.domain.b":   "Exit to %s verified: %s. Suspension released.",
 		"reason.domain_ip":      "IP seen by a service is not allowed",
@@ -514,18 +586,36 @@ func reasonText(r guard.Reason) string {
 	return T("reason.ip")
 }
 
-// EventLine is one line of the history.
-func EventLine(e guard.Event) string {
+func eventTitle(e guard.Event) string {
 	ipc := IPWithCountry(e.IP, e.Country)
 	var s string
 	switch e.Kind {
 	case guard.EvDomainCheck:
+		if e.RetryFamily != "" {
+			return T("hist.retry", appsText(e.Apps))
+		}
 		s = T("ev.domaincheck", appsText(e.Apps))
 	case guard.EvProcessError:
-		s = e.Error
+		switch e.Operation {
+		case "freeze", "resume":
+			return T("hist."+e.Operation+"_error", appsText(e.Apps))
+		case "list":
+			return T("hist.list_error")
+		case "network-monitor":
+			return T("hist.monitor_error")
+		case "journal-policies":
+			return T("hist.journal_error")
+		}
+		s = T("hist.process_error")
 	case guard.EvAutoAllowed:
 		s = T("ev.autoallowed", ipc)
 	case guard.EvNetChanged:
+		if slices.Contains(e.Details, "source=probe kind=expired-result; fresh verification required") {
+			return T("hist.expired_result")
+		}
+		if slices.Contains(e.Details, "source=event-loop kind=interruption; fresh verification required") {
+			return T("hist.interrupted")
+		}
 		s = T("ev.netchanged")
 	case guard.EvIPChanged:
 		s = T("ev.ipchanged", ipc)
@@ -534,9 +624,9 @@ func EventLine(e guard.Event) string {
 	case guard.EvOnline:
 		s = T("ev.online", ipc)
 	case guard.EvFrozen:
-		s = T("ev.frozen", reasonText(e.Reason), appsText(e.Apps))
+		s = T("hist.pause", appsText(e.Apps))
 	case guard.EvHoldReason:
-		s = T("ev.held", reasonText(e.Reason), appsText(e.Apps))
+		s = T("hist.held", appsText(e.Apps))
 	case guard.EvResumed:
 		if e.IgnoredChecks {
 			s = T("ev.resumed.ignored", appsText(e.Apps))
@@ -566,10 +656,7 @@ func EventLine(e guard.Event) string {
 	case guard.EvTrusted:
 		s = T("ev.trusted", e.Network)
 	}
-	for _, detail := range e.Details {
-		s += " | " + guard.DiagnosticText(detail)
-	}
-	return e.At.Local().Format("15:04:05") + "  " + s
+	return s
 }
 
 // Notification returns the title and body for events worth a notification.

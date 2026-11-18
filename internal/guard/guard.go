@@ -196,11 +196,13 @@ type Guard struct {
 	lastIPv4, lastIPv6  exitEvidence
 	serviceEvidence     map[serviceSource]serviceEvidence
 
-	counters Counters
-	history  []Event
-	listener func(Snapshot, []Event)
-	pending  []Event
-	lastKey  string
+	counters    Counters
+	history     []Event
+	eventID     uint64
+	pauseStarts map[int]pauseStart
+	listener    func(Snapshot, []Event)
+	pending     []Event
+	lastKey     string
 }
 
 type operationKey struct {
@@ -337,6 +339,9 @@ func (g *Guard) emit(now time.Time, e Event) {
 	case EvKilledNew:
 		g.counters.Killed++
 	}
+	g.eventID++
+	e.ID = g.eventID
+	g.foldRepeatedCheck(&e)
 	g.history = append(g.history, e)
 	if len(g.history) > historyLen {
 		g.history = g.history[len(g.history)-historyLen:]
@@ -656,7 +661,7 @@ func (g *Guard) event(now time.Time, gr *group, kind EventKind, apps []string, n
 		Others: g.others, DNS: g.dns, DNSCountry: g.dnsCC, Apps: apps, Notify: notify}
 	e.IgnoredChecks = len(g.assess(gr, now).ignored) > 0
 	if (kind == EvFrozen || kind == EvHoldReason) && gr.reason != NoReason && gr.reason != NetChanged && gr.reason != SettingsChanged && gr.status != OK {
-		e.Details = g.domainDiagnostics(gr, now)
+		e.Problems = g.domainDiagnostics(gr, now)
 	}
 	if kind == EvFrozen || kind == EvHoldReason {
 		e.Issues = g.domainIssues(gr, now)
@@ -702,8 +707,10 @@ func (g *Guard) recordRelease(now time.Time, resumed []procs.Proc, cause string)
 	if len(resumed) == 0 {
 		return
 	}
-	g.emit(now, Event{Kind: EvResumed, Apps: procs.AppNames(resumed),
-		Details: []string{fmt.Sprintf("processes=%d; cause=%s", len(resumed), cause)}})
+	e := Event{Kind: EvResumed, Apps: procs.AppNames(resumed), ReleaseCause: cause,
+		Details: []string{fmt.Sprintf("processes=%d; cause=%s", len(resumed), cause)}}
+	g.releaseDuration(now, resumed, &e)
+	g.emit(now, e)
 }
 
 func (g *Guard) resume(gr *group) []procs.Proc {
@@ -723,6 +730,7 @@ func (g *Guard) resumePermitted(gr *group, now time.Time) {
 		e.Notify = false
 	}
 	e.Details = []string{fmt.Sprintf("processes=%d", len(resumed))}
+	g.releaseDuration(now, resumed, &e)
 	g.emit(now, e)
 }
 
@@ -752,7 +760,15 @@ func (g *Guard) operation(op string, p procs.Proc, err error) {
 	msg := fmt.Sprintf("%s PID %d (%s): %v", op, p.PID, p.Name, err)
 	if g.failures[key] != msg {
 		g.failures[key] = msg
-		g.emit(g.lastStep, Event{Kind: EvProcessError, Error: msg, Notify: true})
+		e := Event{Kind: EvProcessError, Operation: op, Error: msg, Notify: true}
+		if p.PID != 0 {
+			name := p.App
+			if name == "" {
+				name = p.Name
+			}
+			e.Apps = []string{name}
+		}
+		g.emit(g.lastStep, e)
 	}
 }
 
@@ -903,6 +919,11 @@ func (g *Guard) enforce(now time.Time) {
 	for _, p := range all {
 		aliveNow[p.PID] = p
 	}
+	for pid, stamp := range g.pauseStarts {
+		if p, ok := aliveNow[pid]; !ok || (p.Created != "" && p.Created != stamp.created) {
+			delete(g.pauseStarts, pid)
+		}
+	}
 	// Release only a positively identified own control process if an older
 	// version had suspended it. The identity check remains in the controller.
 	var controlReleased []procs.Proc
@@ -1041,6 +1062,10 @@ func (g *Guard) enforceGroup(now time.Time, gr *group) {
 				if err == nil {
 					gr.frozen[p.PID] = p
 					frozen = append(frozen, p)
+					if g.pauseStarts == nil {
+						g.pauseStarts = make(map[int]pauseStart)
+					}
+					g.pauseStarts[p.PID] = pauseStart{p.Created, now}
 				} else if owner, ok := g.d.Procs.(interface{ Owns(procs.Proc) bool }); ok && owner.Owns(p) {
 					// The OS may have suspended it before a journal/result failure.
 					gr.frozen[p.PID] = p
@@ -1057,6 +1082,7 @@ func (g *Guard) enforceGroup(now time.Time, gr *group) {
 		e := g.event(now, gr, EvFrozen, procs.AppNames(frozen), gr.reason != NetChanged && gr.reason != SettingsChanged && gr.status != Starting)
 		if gr.status == OK {
 			e.Reason = ProcessPolicyDenied
+			e.HeldBy = g.holdingPolicies(now, gr, frozen)
 			if slices.ContainsFunc(frozen, g.awaitingAppCheck) {
 				e.Reason, e.Notify = AppCheckPending, false
 			}

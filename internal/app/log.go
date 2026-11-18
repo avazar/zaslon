@@ -13,6 +13,10 @@ var logMu sync.Mutex
 
 // Logf appends a line to zaslon.log.
 func Logf(format string, args ...any) {
+	LogAt(time.Now(), fmt.Sprintf(format, args...))
+}
+
+func LogAt(at time.Time, message string) {
 	logMu.Lock()
 	defer logMu.Unlock()
 	p := LogPath()
@@ -24,5 +28,5 @@ func Logf(format string, args ...any) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(f, "%s %s\n", at.Local().Format("2006-01-02 15:04:05"), message)
 }

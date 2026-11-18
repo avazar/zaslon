@@ -79,7 +79,7 @@ func (g *Guard) retryDomainFamily(now time.Time, r ProbeResult) bool {
 	if key.v6 {
 		family = "IPv6"
 	}
-	g.emit(now, Event{Kind: EvDomainCheck, Apps: apps, Domain: d.Endpoint, Details: []string{"retry=immediate after domain timeout", d.Endpoint + " " + family}})
+	g.emit(now, Event{Kind: EvDomainCheck, Apps: apps, CheckID: r.ID, Domain: d.Endpoint, RetryFamily: family})
 	return true
 }
 
@@ -279,7 +279,7 @@ func (g *Guard) expireDomains(now time.Time) {
 		if gr.status == OK && g.activeDomains[gr.key] {
 			if why := g.verdict(gr, now); why != NoReason {
 				gr.status, gr.reason, gr.since = Suspect, why, now
-				g.emit(now, Event{Kind: EvDomainCheck, Apps: gr.names(), Details: g.domainDiagnostics(gr, now)})
+				g.emit(now, Event{Kind: EvDomainCheck, Apps: gr.names(), Problems: g.domainDiagnostics(gr, now)})
 			}
 		}
 	}

@@ -36,23 +36,34 @@ const (
 )
 
 type Event struct {
-	At              time.Time
-	Kind            EventKind
-	Reason          Reason
-	IP, Country     string
-	Issues          []DomainIssue
-	Domain          string
-	IP6, Country6   string
-	IPv6Unknown     bool
-	Others          []string
-	DNS, DNSCountry string
-	Network         string
-	Apps            []string
-	Dur             time.Duration
-	Notify          bool // worth a system notification, not just a line in the history
-	IgnoredChecks   bool // resumed under an explicit unavailable-result policy
-	Error           string
-	Details         []string // immutable diagnostic context retained in history and the log
+	ID                 uint64
+	CheckID            uint64
+	FirstCheck         uint64
+	FirstAt            time.Time
+	Repeats            int
+	Problems           []CheckProblem
+	RetryFamily        string
+	HeldBy             []string
+	PauseMin, PauseMax time.Duration
+	ReleaseCause       string
+	Operation          string
+	At                 time.Time
+	Kind               EventKind
+	Reason             Reason
+	IP, Country        string
+	Issues             []DomainIssue
+	Domain             string
+	IP6, Country6      string
+	IPv6Unknown        bool
+	Others             []string
+	DNS, DNSCountry    string
+	Network            string
+	Apps               []string
+	Dur                time.Duration
+	Notify             bool // worth a system notification, not just a line in the history
+	IgnoredChecks      bool // resumed under an explicit unavailable-result policy
+	Error              string
+	Details            []string // immutable diagnostic context retained in history and the log
 }
 
 // GroupState is one set of apps sharing rules, for the panel.
