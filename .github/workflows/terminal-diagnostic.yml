@@ -1,0 +1,31 @@
+name: Linux interactive terminal diagnostic
+on:
+  push:
+    branches: [codex/linux-terminal-check-140]
+permissions:
+  contents: read
+jobs:
+  terminal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Build the process controller from Zaslon 1.4.0
+        run: go build -o "$RUNNER_TEMP/controller" ./tools/terminal-check
+      - name: Check interactive Bash with cat
+        run: timeout 45s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" /bin/cat
+      - name: Get official Codex CLI 0.170.0
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 2 -o codex.tar.gz https://github.com/openai/codex/releases/download/rust-v0.170.0/codex-x86_64-unknown-linux-musl.tar.gz
+          echo 'd054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5  codex.tar.gz' | sha256sum -c
+          tar xzf codex.tar.gz
+          install -m 755 codex-x86_64-unknown-linux-musl codex
+          ./codex --version
+      - name: Check real Codex in Bash with an empty profile
+        run: timeout 55s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" "$RUNNER_TEMP/codex"
