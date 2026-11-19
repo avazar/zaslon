@@ -92,7 +92,13 @@ func run(tray bool) {
 		return // exit 0: launchd must not restart us for this
 	}
 	defer lock.Unlock()
-	processes, err := recovery.Open(app.Dir(), procs.New())
+	backend := procs.New()
+	if terminal, ok := backend.(interface{ OnTerminalFallback(func()) }); ok {
+		terminal.OnTerminalFallback(func() {
+			app.Logf("Linux terminal: using strict signal suspension. For automatic keyboard recovery in Bash, use: source <(zaslon bash-init). For another CLI, pass its command name to bash-init.")
+		})
+	}
+	processes, err := recovery.Open(app.Dir(), backend)
 	if err == nil {
 		err = processes.Prune()
 	}
@@ -183,6 +189,9 @@ func fatal(err error) {
 }
 
 func cli(args []string) error {
+	if args[0] == "bash-init" && runtime.GOOS == "linux" {
+		return bashInit(os.Stdout, args[1:])
+	}
 	// Read, never create: the first start of the app itself must see a missing
 	// config, that's how it knows to turn on autostart.
 	cfg := config.Default()
@@ -236,6 +245,7 @@ const usage = `Zaslon - kill switch for apps: freezes them when your network or 
   zaslon panel           open the Zaslon panel
   zaslon update          install the latest version
   zaslon headless        run without a tray icon
+  zaslon bash-init [CLI ...]  print Linux Bash integration (default: codex and claude)
   zaslon version
 
 https://github.com/avazar/zaslon

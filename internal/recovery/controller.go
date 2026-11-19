@@ -18,8 +18,9 @@ import (
 const FileName = "process-recovery.json"
 
 type Entry struct {
-	Process procs.Proc `json:"process"`
-	Phase   string     `json:"phase"` // freezing/resuming are ambiguous after a crash
+	Process procs.Proc          `json:"process"`
+	Group   *procs.FreezerGroup `json:"freezer,omitempty"`
+	Phase   string              `json:"phase"` // freezing/resuming are ambiguous after a crash
 }
 
 type journal struct {
@@ -48,10 +49,13 @@ func Open(dir string, backend procs.Controller) (*Controller, error) {
 	if err := json.Unmarshal(b, &j); err != nil {
 		return nil, fmt.Errorf("recovery journal: %w", err)
 	}
-	if j.Version != 1 || j.Entries == nil {
+	if (j.Version != 1 && j.Version != 2) || j.Entries == nil {
 		return nil, errors.New("unsupported recovery journal; preserved for inspection")
 	}
 	for pid, e := range j.Entries {
+		if e.Group != nil && (j.Version != 2 || e.Group.Path == "" || e.Group.Inode == 0) {
+			return nil, errors.New("invalid freezer journal entry; preserved for inspection")
+		}
 		if pid <= 0 || e.Process.PID != pid || e.Process.Created == "" || (e.Phase != "freezing" && e.Phase != "frozen" && e.Phase != "resuming") {
 			return nil, errors.New("invalid recovery entry; journal preserved")
 		}
@@ -72,7 +76,15 @@ func (c *Controller) Entries() []Entry {
 }
 
 func (c *Controller) save() error {
-	b, err := json.MarshalIndent(journal{Version: 1, Entries: c.entries}, "", "  ")
+	version := 1
+	for _, e := range c.entries {
+		if e.Group != nil {
+			// A signal-only recovery binary must never discard a kernel freeze.
+			version = 2
+			break
+		}
+	}
+	b, err := json.MarshalIndent(journal{Version: version, Entries: c.entries}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -99,6 +111,15 @@ func (c *Controller) ConfirmedSuspensions() ([]procs.Proc, error) {
 		}
 		if p, ok := alive[pid]; !ok || p.Created == "" || !procs.SameProcess(p, e.Process) {
 			return nil, fmt.Errorf("PID %d: process identity unavailable; protection recovery refused", pid)
+		}
+		if e.Group != nil {
+			backend, ok := c.os.(procs.GroupController)
+			if !ok {
+				return nil, errors.New("Linux cgroup recovery unavailable")
+			}
+			if err := backend.CheckGroup(e.Process, e.Group); err != nil {
+				return nil, err
+			}
 		}
 		p := e.Process
 		p.PolicyIDs = append([]string(nil), p.PolicyIDs...)
@@ -181,7 +202,17 @@ func (c *Controller) Freeze(p procs.Proc) error {
 		delete(c.entries, p.PID)
 		return err
 	}
-	if err := c.os.Freeze(p); err != nil {
+	var group *procs.FreezerGroup
+	var err error
+	if backend, ok := c.os.(procs.GroupController); ok {
+		group, err = backend.FreezeTracked(p, func(intent *procs.FreezerGroup) error {
+			c.entries[p.PID] = Entry{Process: p, Phase: "freezing", Group: intent}
+			return c.save()
+		})
+	} else {
+		err = c.os.Freeze(p)
+	}
+	if err != nil {
 		if errors.Is(err, procs.ErrNotApplied) {
 			delete(c.entries, p.PID)
 			if saveErr := c.save(); saveErr != nil {
@@ -191,7 +222,7 @@ func (c *Controller) Freeze(p procs.Proc) error {
 		}
 		return err
 	}
-	c.entries[p.PID] = Entry{Process: p, Phase: "frozen"}
+	c.entries[p.PID] = Entry{Process: p, Phase: "frozen", Group: group}
 	return c.save()
 }
 
@@ -205,12 +236,25 @@ func (c *Controller) Resume(p procs.Proc) error {
 	if e.Phase != "frozen" {
 		return fmt.Errorf("PID %d: ambiguous %s; refusing a blind resume", p.PID, e.Phase)
 	}
-	c.entries[p.PID] = Entry{Process: e.Process, Phase: "resuming"}
+	intent := e
+	intent.Phase = "resuming"
+	c.entries[p.PID] = intent
 	if err := c.save(); err != nil {
 		c.entries[p.PID] = e
 		return err
 	}
-	if err := c.os.Resume(e.Process); err != nil {
+	var err error
+	if e.Group != nil {
+		backend, ok := c.os.(procs.GroupController)
+		if !ok {
+			err = errors.Join(procs.ErrNotApplied, errors.New("Linux cgroup recovery unavailable"))
+		} else {
+			err = backend.ReleaseGroup(e.Process, e.Group)
+		}
+	} else {
+		err = c.os.Resume(e.Process)
+	}
+	if err != nil {
 		if errors.Is(err, procs.ErrNotApplied) {
 			c.entries[p.PID] = e
 			return errors.Join(err, c.save())
@@ -220,7 +264,7 @@ func (c *Controller) Resume(p procs.Proc) error {
 	delete(c.entries, p.PID)
 	// If this write fails, keep the uncertain on-disk intent; do not resume twice.
 	if err := c.save(); err != nil {
-		c.entries[p.PID] = Entry{Process: e.Process, Phase: "resuming"}
+		c.entries[p.PID] = intent
 		return err
 	}
 	return nil
@@ -236,6 +280,15 @@ func (c *Controller) Kill(p procs.Proc) error {
 	e, ok := c.entries[p.PID]
 	if !ok || !procs.SameProcess(p, e.Process) {
 		return nil
+	}
+	if e.Group != nil {
+		backend, ok := c.os.(procs.GroupController)
+		if !ok {
+			return errors.New("Linux cgroup recovery unavailable")
+		}
+		if err := backend.ForgetGroup(e.Process, e.Group); err != nil {
+			return err
+		}
 	}
 	delete(c.entries, p.PID)
 	if err := c.save(); err != nil {
@@ -268,12 +321,23 @@ func (c *Controller) pruneSnapshot(all []procs.Proc) error {
 	for pid, e := range c.entries {
 		p, exists := alive[pid]
 		if !exists || (p.Created != "" && !procs.SameProcess(p, e.Process)) {
+			if e.Group != nil {
+				backend, ok := c.os.(procs.GroupController)
+				if !ok {
+					return errors.New("Linux cgroup recovery unavailable")
+				}
+				if err := backend.ForgetGroup(e.Process, e.Group); err != nil {
+					return err
+				}
+			}
 			old[pid] = e
-			delete(c.entries, pid)
 		}
 	}
 	if len(old) == 0 {
 		return nil
+	}
+	for pid := range old {
+		delete(c.entries, pid)
 	}
 	if err := c.save(); err != nil {
 		for pid, e := range old {
