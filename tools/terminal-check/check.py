@@ -16,6 +16,8 @@ from pathlib import Path
 
 controller, program = sys.argv[1:]
 integration = os.getenv("CHECK_FOREGROUND_BASH")
+freezer = os.getenv("CHECK_CGROUP_FREEZER")
+retain_terminal = integration or freezer
 name = Path(program).name
 profile = tempfile.TemporaryDirectory(dir=os.environ.get("RUNNER_TEMP"))
 shell, master = pty.fork()
@@ -86,8 +88,10 @@ try:
     with subprocess.Popen(command + [str(shell), str(target), name],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as control:
         assert control.stdout.readline().strip() == "paused"
-        if integration:
-            assert os.tcgetpgrp(master) == job and state(target) == "T"
+        if retain_terminal:
+            assert os.tcgetpgrp(master) == job
+            if not freezer:
+                assert state(target) == "T"
             offset = len(transcript)
             os.write(master, b"\x1b[<35;42;11M")
             collect(0.4)
@@ -111,7 +115,7 @@ try:
     collect(1.2)
     print("After Zaslon Resume: foreground =", os.tcgetpgrp(master),
           "bash =", shell, "job =", target, "job state =", state(target))
-    if integration:
+    if retain_terminal:
         assert os.tcgetpgrp(master) == job, "shell reclaimed terminal"
     elif os.tcgetpgrp(master) == shell:
         if name == "codex":
@@ -138,7 +142,7 @@ try:
         offset = len(transcript)
         os.write(master, b"\x1b[B")
         collect(0.7)
-        if integration:
+        if retain_terminal:
             assert b"> 2. " in transcript[offset:], "Down did not select the second menu item"
             print("Automatic recovery: Down selected the second Codex menu item without fg")
         print("After resume: foreground =", os.tcgetpgrp(master) == job,

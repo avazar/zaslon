@@ -46,3 +46,11 @@ jobs:
         run: |
           export CHECK_FOREGROUND_BASH="$PWD/tools/terminal-check/foreground.bash"
           timeout 120s python3 -u tools/terminal-check/release_check.py "$RUNNER_TEMP/zaslon-release/zaslon" "$CODEX_TEST_BIN"
+      - name: Check direct absolute path with the kernel freezer in a delegated CI unit
+        run: |
+          group=$(sed -n 's/^0:://p' /proc/self/cgroup)
+          echo "Default runner group=$group"
+          if test -w "/sys/fs/cgroup$group/cgroup.procs" && test -w "/sys/fs/cgroup$group"; then echo "Default group writable"; else echo "Default group lacks delegation"; fi
+          sudo systemd-run --wait --pipe --collect --unit="zaslon-tty-test-$GITHUB_RUN_ID" --property="User=$(id -un)" --property=Delegate=yes --working-directory="$PWD" \
+            --setenv="CHECK_CGROUP_FREEZER=1" --setenv="RUNNER_TEMP=$RUNNER_TEMP" --setenv="CODEX_TEST_PACKAGE=$RUNNER_TEMP/package" \
+            /usr/bin/timeout 80s /usr/bin/python3 -u tools/terminal-check/check.py "$PWD/tools/terminal-check/freezer_probe.py" "$CODEX_TEST_BIN"
