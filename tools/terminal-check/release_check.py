@@ -26,6 +26,16 @@ def trigger(profile, target):
         return json.loads(read_file(journal) or "{}").get("entries", {}).get(target, {}).get("phase")
     gate.touch()
     wait("failed probe did not suspend Codex", lambda: phase() == "frozen")
+    if os.getenv("CHECK_FOREGROUND_BASH"):
+        # Hold through another full IP probe. Every recorded process must stay stopped.
+        for i in range(25):
+            entries = json.loads(journal.read_text())["entries"]
+            assert entries[target]["phase"] == "frozen"
+            for pid, entry in entries.items():
+                assert entry["phase"] == "frozen"
+                assert Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()[0] == "T"
+            time.sleep(0.16)
+        print(f"Strict hold: {len(entries)} processes remained stopped through repeated failed probes", file=sys.stderr)
     print("paused", flush=True)
     if input() != "resume":
         raise RuntimeError("unexpected command")

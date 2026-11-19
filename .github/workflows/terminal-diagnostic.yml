@@ -42,3 +42,7 @@ jobs:
           tar xzf zaslon-1.4.0-linux-amd64.tar.gz
           ./zaslon version
           timeout 120s python3 -u "$GITHUB_WORKSPACE/tools/terminal-check/release_check.py" "$PWD/zaslon" "$CODEX_TEST_BIN"
+      - name: Assert strict pause and automatic keyboard recovery in Bash
+        run: |
+          export CHECK_FOREGROUND_BASH="$PWD/tools/terminal-check/foreground.bash"
+          timeout 120s python3 -u tools/terminal-check/release_check.py "$RUNNER_TEMP/zaslon-release/zaslon" "$CODEX_TEST_BIN"
