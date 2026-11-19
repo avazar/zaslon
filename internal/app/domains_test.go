@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -14,6 +16,36 @@ import (
 	"github.com/avazar/zaslon/internal/guard"
 	"github.com/avazar/zaslon/internal/netwatch"
 )
+
+func TestManualRouteCheckMeasuresOnlyRunningSharedEndpoint(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, "h=%s\nip=203.0.113.10\nloc=NL\n", r.Host)
+	}))
+	defer server.Close()
+	cfg := config.Default()
+	cfg.Apps = []string{"chatgpt", "codex", "claude"}
+	cfg.DomainChecksEnabled = map[string]bool{"chatgpt": true, "codex": true, "claude": true}
+	ep := server.URL + "/cdn-cgi/trace"
+	cfg.DomainChecks = map[string][]string{"chatgpt": {ep}, "codex": {ep}, "claude": {ep}}
+	cfg.CheckIPv6 = false
+	cfg.IPServices = []string{"unsupported:fixture"}
+	res, err := MeasureRoutes(t.Context(), cfg, map[string]bool{"chatgpt": true, "codex": true})
+	if err != nil || hits.Load() != 1 || len(res.Domains) != 2 {
+		t.Fatalf("hits=%d: %+v, %v", hits.Load(), res, err)
+	}
+	for _, id := range []string{"chatgpt", "codex"} {
+		d := res.Domains[id][0]
+		if d.IP != "203.0.113.10" || d.Country != "NL" || d.RouteTime[0] <= 0 || d.RouteTime[1] != 0 {
+			t.Fatal(d)
+		}
+	}
+	if cfg.DNSCheck != "warn" {
+		t.Fatal("diagnostics changed live config")
+	}
+}
 
 func TestProbeTimeoutClassification(t *testing.T) {
 	for _, tc := range []struct {

@@ -27,11 +27,12 @@ const (
 
 // Tray is the menu bar (macOS) / notification area (Windows, Linux) app.
 type Tray struct {
-	G           *guard.Guard
-	Version     string
-	OnQuit      func()
-	UpdateCheck bool
-	Stats       *app.Stats
+	ObserveRoutes func(guard.Snapshot)
+	G             *guard.Guard
+	Version       string
+	OnQuit        func()
+	UpdateCheck   bool
+	Stats         *app.Stats
 
 	mu          sync.Mutex
 	lastIcon    string
@@ -364,6 +365,9 @@ func (t *Tray) row(it *systray.MenuItem, title string, visible bool) {
 
 // render is called by the guard after every change.
 func (t *Tray) render(s guard.Snapshot, evs []guard.Event) {
+	if t.ObserveRoutes != nil {
+		t.ObserveRoutes(s)
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cfg := s.Config

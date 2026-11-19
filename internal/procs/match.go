@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/avazar/zaslon/internal/config"
@@ -35,6 +36,26 @@ type Proc struct {
 
 // SameProcess also works for synthetic processes used by pure guard tests.
 func SameProcess(a, b Proc) bool { return a.PID == b.PID && a.Created == b.Created }
+
+// A parent PID can outlive the process it identified, particularly on Windows.
+// Reject only impossible ancestry. Equal or unavailable creation times cannot
+// disprove a relationship, so strict descendant protection still applies.
+func predatesParent(child, parent string) bool {
+	if child == "" || parent == "" {
+		return false
+	}
+	// Linux birth identities include the boot ID before the start tick.
+	if boot, ticks, ok := strings.Cut(child, ":"); ok {
+		parentTicks, sameBoot := strings.CutPrefix(parent, boot+":")
+		if !sameBoot {
+			return false
+		}
+		child, parent = ticks, parentTicks
+	}
+	c, childErr := strconv.ParseInt(child, 10, 64)
+	p, parentErr := strconv.ParseInt(parent, 10, 64)
+	return childErr == nil && parentErr == nil && c > 0 && c < p
+}
 
 // Rule matches processes of one app. See config template for the syntax.
 type Rule struct {
@@ -252,7 +273,7 @@ func Filter(all []Proc, ts []Target, self int) []Proc {
 		pid := queue[0]
 		queue = queue[1:]
 		for _, c := range children[pid] {
-			if c <= 1 {
+			if c <= 1 || predatesParent(byPID[c].Created, byPID[pid].Created) {
 				continue
 			}
 			if _, seen := app[c]; !seen {

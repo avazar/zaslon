@@ -5,11 +5,13 @@
 
 const L = {
   ru: {
+    protection_error: "Ошибка защиты",
+    checks: "Проверка",
     confirm_title: "Подтвердите разрешение", confirm_accept: "Разрешить", confirm_cancel: "Отмена",
     confirm_ip: "Будет добавлен только указанный IP или диапазон. Другие адреса не добавляются.",
     confirm_country: "Будет разрешена указанная страна для IPv4 и IPv6. Другие страны не добавляются.",
     confirm_rule: "Эти разрешения заменят общие правила для приложения.",
-    confirm_trust: "В этой сети проверки IP, доменов, IPv6 и DNS обходятся после успешного запроса IP. Добавляйте только сеть, в которой намеренно разрешаете прямой выход.",
+    confirm_trust: "В этой сети приложения смогут выходить в интернет без VPN. Когда Zaslon распознает роутер и получит внешний IP, он не будет приостанавливать приложения из-за правил IP, стран, доменов, IPv6 и DNS.",
     confirm_scope: "Общие разрешения",
     o_ip_unavailable: "Если IP не удалось определить", o_ip_unavailable_d: "Нет связи или не отвечает сервис проверки, включая домены приложения. Продолжение разрешает работу без подтверждения разрешённого выхода.",
     o_ipv6_unavailable: "Если IPv6 не удалось проверить", o_ipv6_unavailable_d: "Например, VPN блокирует IPv6. Проверки продолжатся; полученный запрещённый IPv6 или противоречащие ответы всё равно приостанавливают приложения.",
@@ -24,12 +26,12 @@ const L = {
     settings_changed: "Изменены правила защиты", country_unknown: "Страна выхода IPv4 не определена", country6_unknown: "Страна выхода IPv6 не определена",
     domain_unknown: "Не удалось проверить внешний IP приложения", domain_ip: "IP сервиса не разрешён", domain_wait: "Ожидается новая проверка", domain_v6_absent: "нет IPv6 у домена или проверка отключена",
     process_error: "ошибка защиты", ipv6_unknown: "Не удалось проверить IPv6",
-    overview: "Обзор", apps: "Приложения", allow: "Разрешено", networks: "Сети", stats: "Статистика",
+    overview: "Обзор", apps: "Приложения", allow: "Разрешено", stats: "Статистика",
     history: "История", settings: "Настройки", about: "О программе",
     lead_overview: "Что сейчас с сетью и защищёнными приложениями",
+    lead_checks: "Сетевые маршруты Zaslon",
     lead_apps: "Zaslon замораживает выбранные программы, когда сеть или IP не те. У каждой могут быть свои правила.",
-    lead_allow: "Где приложениям можно работать. Подходит хоть что-то одно - значит можно.",
-    lead_networks: "В доверенных сетях (дом, офис) приложения работают без проверки IP. Сеть узнаётся по её роутеру.",
+    lead_allow: "Разрешённые IP-адреса, страны и доверенные сети.",
     lead_stats: "Сколько раз Zaslon вмешивался за последние 14 дней",
     lead_history: "Последние события",
     lead_settings: "Изменения сохраняются сразу",
@@ -63,11 +65,13 @@ const L = {
     history_empty: "Пока ничего не случилось", paused_until: "Пауза до", paused_forever: "Пауза до перезапуска",
   },
   en: {
+    protection_error: "Protection error",
+    checks: "Network check",
     confirm_title: "Confirm permission", confirm_accept: "Allow", confirm_cancel: "Cancel",
     confirm_ip: "Only the listed IP or range will be added. No other addresses are added.",
     confirm_country: "The listed country will be allowed for IPv4 and IPv6. No other countries are added.",
     confirm_rule: "These permissions will replace the shared rules for this app.",
-    confirm_trust: "On this network, IP, domain, IPv6 and DNS rules are bypassed after a successful IP request. Add it only if you deliberately permit a direct connection there.",
+    confirm_trust: "Apps can connect without a VPN on this network. Once Zaslon recognizes the router and obtains a public IP, it won’t pause apps based on IP, country, domain, IPv6 or DNS rules.",
     confirm_scope: "Shared permissions",
     o_ip_unavailable: "If the IP check is unavailable", o_ip_unavailable_d: "No connection or a failed checker, including app domains. Continuing permits apps without confirmation of the allowed exit.",
     o_ipv6_unavailable: "If IPv6 cannot be checked", o_ipv6_unavailable_d: "For example, the VPN blocks IPv6. Checks continue; a received disallowed IPv6 or conflicting responses still suspend apps.",
@@ -82,12 +86,12 @@ const L = {
     settings_changed: "Protection settings changed", country_unknown: "IPv4 exit country unknown", country6_unknown: "IPv6 exit country unknown",
     domain_unknown: "App’s public IP could not be verified", domain_ip: "Service IP not allowed", domain_wait: "Waiting for a fresh check", domain_v6_absent: "no service IPv6 or check disabled",
     process_error: "protection error", ipv6_unknown: "IPv6 check inconclusive",
-    overview: "Overview", apps: "Apps", allow: "Allowed", networks: "Networks", stats: "Statistics",
+    overview: "Overview", apps: "Apps", allow: "Allowed", stats: "Statistics",
     history: "History", settings: "Settings", about: "About",
     lead_overview: "Your network and protected apps right now",
+    lead_checks: "Network routes from Zaslon",
     lead_apps: "Zaslon freezes the chosen apps when the network or IP isn't right. Each one can have its own rules.",
-    lead_allow: "Where apps may run. Matching any one entry is enough.",
-    lead_networks: "On trusted networks (home, office) apps run without the IP check. A network is recognised by its router.",
+    lead_allow: "Allowed IP addresses, countries and trusted networks.",
     lead_stats: "How often Zaslon stepped in over the last 14 days",
     lead_history: "Recent events",
     lead_settings: "Changes are saved right away",
@@ -123,6 +127,7 @@ const L = {
 };
 
 const ICONS = {
+  checks: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="m12 12 7-7"/>',
   overview: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   apps: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   allow: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
@@ -140,7 +145,7 @@ const ICONS = {
 const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const PAGES = ["overview", "apps", "allow", "networks", "stats", "history", "settings", "about"];
+const PAGES = ["overview", "checks", "apps", "allow", "stats", "history", "settings", "about"];
 let S = null; // last state
 let page = (location.hash || "#overview").slice(1);
 let countries = [];
@@ -255,6 +260,10 @@ function heroSub(state = S) {
   ].filter(Boolean).join("<br>");
 }
 
+function heroTitle(state = S) {
+  return state.status === "error" && state.errors?.length ? t("protection_error") : state.statusText;
+}
+
 const heroIcon = (status) => ({ ok: "check", warning: "warning", frozen: "snow", starting: "snow", blocked: "stop", error: "stop", paused: "pause" })[status];
 
 function overview() {
@@ -267,11 +276,11 @@ function overview() {
     : `<div class="card tile"><div class="k">${t("dns")}</div><div class="v">-</div><div class="s">${t("dns_unknown")}</div></div>`;
   const netTile = S.network
     ? `<div class="card tile"><div class="k">${t("network")}</div><div class="v">${esc(S.network)}</div><div class="s">${t("trusted_net")}</div></div>`
-    : `<div class="card tile"><div class="k">${t("network")}</div><div class="v">${S.netId ? t("usual_net") : t("unknown_net")}</div>${S.netId ? `<div class="s selectable">${t("router")} ${esc(S.netId)}</div><div class="row"><button class="btn small" data-go="networks">${t("trust")}…</button></div>` : ""}</div>`;
+    : `<div class="card tile"><div class="k">${t("network")}</div><div class="v">${S.netId ? t("usual_net") : t("unknown_net")}</div>${S.netId ? `<div class="s selectable">${t("router")} ${esc(S.netId)}</div><div class="row"><button class="btn small" data-go="allow/trusted">${t("trust")}…</button></div>` : ""}</div>`;
   return `${upd}
   <div class="card hero ${S.status}">
     <div class="orb">${svg(heroIcon(S.status))}</div>
-    <div><div class="title">${esc(S.statusText)}</div><div class="sub">${heroSub()}</div></div>
+    <div><div class="title">${esc(heroTitle())}</div><div class="sub">${heroSub()}</div></div>
     <div class="actions">${heroActions()}</div>
   </div>
   <div class="grid">
@@ -403,17 +412,19 @@ function allowEditor(r, app = "") {
 }
 
 function allow() {
-  return `<div class="card pad">${allowEditor(S.allow)}</div>`;
+  return `<div class="card pad">${allowEditor(S.allow)}</div>${trustedNetworks()}`;
 }
 
-function networks() {
+function trustedNetworks() {
   const list = (S.trusted || []).map((n) => `<div class="item"><div class="avatar">${svg("networks")}</div>
     <div><div class="name">${esc(n.name)} ${n.current ? `<span class="badge ok">${t("here")}</span>` : ""}</div><div class="meta selectable">${t("router")} ${esc(n.id)}</div></div>
     <div class="end"><button class="btn small" data-rename="${esc(n.id)}" data-name="${esc(n.name)}">${t("rename")}</button><button class="btn small danger" data-op="untrust_network" data-value="${esc(n.id)}">${t("remove")}</button></div></div>`).join("");
-  const cur = S.network ? "" : `<h2>${t("current_net")}</h2><div class="card pad">${S.netId
+  const cur = S.network ? "" : `<div class="item"><div class="trust-current"><div class="name">${t("current_net")}</div>${S.netId
     ? `<div class="meta selectable">${t("router")} ${esc(S.netId)}</div><div class="add"><input id="netName" placeholder="${t("net_name")}"><button class="btn primary" id="trustBtn">${t("trust")}</button></div>`
-    : `<div class="empty">${t("unknown_net")}</div>`}</div>`;
-  return `${cur}<h2>${t("trusted_list")}</h2><div class="card list">${list || `<div class="item"><div class="empty">${t("no_trusted")}</div></div>`}</div>`;
+    : `<div class="empty">${t("unknown_net")}</div>`}</div></div>`;
+  return `<section aria-labelledby="trusted-heading"><h2 id="trusted-heading">${t("trusted_list")}</h2>
+    <div class="trust-notice"><span aria-hidden="true">${svg("warning")}</span><p>${t("confirm_trust")}</p></div>
+    <div class="card list">${cur}${list || `<div class="item"><div class="empty">${t("no_trusted")}</div></div>`}</div></section>`;
 }
 
 function statsNumbers() {
@@ -503,16 +514,39 @@ function about() {
     <div class="links"><button class="btn" data-url="https://github.com/avazar/zaslon">${t("github")}</button><button class="btn" data-url="https://github.com/avazar/zaslon/blob/dev/LICENSE">MIT License</button></div></div>`;
 }
 
-const RENDER = { overview, apps, allow, networks, stats, history, settings, about };
+const RENDER = { overview, apps, allow, stats, history, settings, about };
+
+function pageHeader(id, action = "") {
+  const key = "lead_" + id;
+  const subtitle = t(key);
+  return `<header class="page-header"><div class="page-heading">
+    <span class="page-emblem" aria-hidden="true">${svg(id)}</span>
+    <div><h1>${esc(t(id))}</h1>${subtitle === key ? "" : `<p>${esc(subtitle)}</p>`}</div>
+  </div>${action}</header>`;
+}
 
 function nav(state = S) {
   const bad = ["frozen", "blocked", "error", "warning"].includes(state.status);
+  const compact = document.getElementById("compact-nav");
+  if (compact) {
+    if (compact.lang !== state.lang) {
+      compact.lang = state.lang;
+      compact.innerHTML = PAGES.map(p => `<option value="${p}">${t(p)}</option>`).join("");
+    }
+    compact.value = page;
+  }
   document.getElementById("nav").innerHTML = PAGES.map((p) =>
     `<button type="button" data-go="${p}"${p === page ? ' class="on" aria-current="page"' : ""}>${svg(p)}<span>${t(p)}</span>${p === "overview" && bad ? `<span class="badge ${state.status}">!</span>` : ""}</button>`).join("");
   document.getElementById("ver").textContent = state.version;
 }
 
 function render() {
+  if (!S) return;
+  const showTrusted = page === "allow/trusted" || page === "networks";
+  if (showTrusted) {
+    page = "allow";
+    if (location.hash === "#networks") window.history.replaceState(null, "", "#allow/trusted");
+  }
   if (!PAGES.includes(page)) page = "overview";
   document.documentElement.lang = S.lang;
   nav();
@@ -521,7 +555,11 @@ function render() {
   const keep = main.scrollTop;
   const expanded = page === "history" ? new Set(Array.from(main.querySelectorAll("details[data-event][open]"), el => el.dataset.event)) : null;
   const focused = page === "history" && document.activeElement?.closest("details[data-event]")?.dataset.event;
-  main.innerHTML = `<div class="page"><h1>${t(page)}</h1><p class="lead">${t("lead_" + page) === "lead_" + page ? "" : t("lead_" + page)}</p>${RENDER[page]()}</div>`;
+  if (page === "checks") {
+    NetworkChecks.render(main);
+  } else {
+    main.innerHTML = `<div class="page">${pageHeader(page)}${RENDER[page]()}</div>`;
+  }
   if (expanded) {
     for (const el of main.querySelectorAll("details[data-event]")) {
       el.open = expanded.has(el.dataset.event);
@@ -529,6 +567,7 @@ function render() {
     }
   }
   main.scrollTop = keep;
+  if (showTrusted) document.getElementById("trusted-heading").scrollIntoView({ block: "start" });
 }
 
 // Re-render on changes, but never under the user's fingers.
@@ -552,7 +591,7 @@ async function refresh(force = false) {
       if (hero) {
         hero.className = `card hero ${state.status}`;
         hero.querySelector(".orb").innerHTML = svg(heroIcon(state.status));
-        hero.querySelector(".title").textContent = state.statusText;
+        hero.querySelector(".title").textContent = heroTitle(state);
         hero.querySelector(".sub").innerHTML = heroSub(state);
       }
       deferredJSON = txt;
@@ -644,6 +683,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", async (e) => {
   const el = e.target;
+  if (el.id === "compact-nav") { location.hash = el.value; return; }
   if (el.dataset.ruleSource !== undefined) {
     const app = el.dataset.ruleSource;
     const ok = el.value === "shared" ? await api("remove_rule", { app })

@@ -2,10 +2,42 @@ package procs
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/avazar/zaslon/internal/config"
 )
+
+func TestFilterRejectsReusedParentPID(t *testing.T) {
+	targets := []Target{
+		{ID: "chatgpt", Name: "ChatGPT", Rule: ParseMatch([]string{"ChatGPT"})},
+		{ID: "codex", Name: "Codex", Rule: ParseMatch([]string{"codex"})},
+	}
+	all := []Proc{
+		{PID: 10, Created: "100", Name: "ChatGPT.exe"},
+		{PID: 20, PPID: 10, Created: "90", Name: "Taskmgr.exe"},
+		{PID: 21, PPID: 20, Created: "110", Name: "worker.exe"},
+		{PID: 30, PPID: 10, Created: "101", Name: "worker.exe"},
+		{PID: 31, PPID: 30, Created: "102", Name: "helper.exe"},
+		{PID: 40, PPID: 10, Created: "80", Name: "codex.exe"},
+		{PID: 50, PPID: 10, Created: "100", Name: "worker.exe"},
+		{PID: 60, PPID: 10, Name: "worker.exe"},
+	}
+	got := Filter(all, targets, 999)
+	var pids []int
+	for _, p := range got {
+		pids = append(pids, p.PID)
+		if p.PID == 40 && !slices.Equal(p.PolicyIDs, []string{"codex"}) {
+			t.Fatalf("directly matched process inherited a false policy: %+v", p)
+		}
+	}
+	if !slices.Equal(pids, []int{10, 30, 31, 40, 50, 60}) {
+		t.Fatalf("selected PIDs %v", pids)
+	}
+	if !predatesParent("boot:90", "boot:100") || predatesParent("old:90", "new:100") || predatesParent("unknown", "100") {
+		t.Fatal("incomparable identities must preserve strict inheritance")
+	}
+}
 
 func TestRuleMatch(t *testing.T) {
 	mac, _ := PresetByID("claude")

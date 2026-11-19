@@ -61,7 +61,7 @@ func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func()
 	ctx, cancel := context.WithTimeout(r.ctx, 12*time.Second)
 	go func() {
 		defer cancel()
-		res := guard.ProbeResult{ID: id}
+		res := guard.ProbeResult{ID: id, RouteProxy: netwatch.ProxyIdentity(netwatch.SystemProxy())}
 		possible, possibleErr := false, error(nil)
 		if c.CheckIPv6 {
 			if r.ipv6Possible != nil {
@@ -115,18 +115,24 @@ func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func()
 				defer close(m.done)
 				measure := func(v6 bool) guard.DomainResult {
 					for attempt := 0; ; attempt++ {
-						d := guard.DomainResult{Endpoint: m.endpoint, CheckedAt: time.Now()}
+						d := guard.DomainResult{Endpoint: m.endpoint, CheckedAt: time.Now(), RouteProxy: res.RouteProxy}
 						value, err := trace(ctx, m.endpoint, httpTimeout, v6)
 						if v6 {
+							d.Retried[1] = attempt > 0
+							d.RouteTime[1] = time.Since(d.CheckedAt)
 							if err == nil {
 								d.IP6, d.Country6 = value.IP, value.Country
 							} else if !errors.Is(err, netwatch.ErrNoIPv6) {
 								d.IPv6Error, d.IPv6Timeout = err.Error(), isProbeTimeout(err)
 							}
-						} else if err != nil {
-							d.Error, d.Timeout = err.Error(), isProbeTimeout(err)
 						} else {
-							d.IP, d.Country = value.IP, value.Country
+							d.Retried[0] = attempt > 0
+							d.RouteTime[0] = time.Since(d.CheckedAt)
+							if err != nil {
+								d.Error, d.Timeout = err.Error(), isProbeTimeout(err)
+							} else {
+								d.IP, d.Country = value.IP, value.Country
+							}
 						}
 						part := guard.ProbeResult{Part: guard.DomainFamily, Sample: d, SampleIPv6: v6}
 						if attempt == 0 && (d.Timeout || d.IPv6Timeout) {
@@ -153,6 +159,8 @@ func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func()
 				d := measure(false)
 				if v6Result != nil {
 					v := <-v6Result
+					d.RouteTime[1] = v.RouteTime[1]
+					d.Retried[1] = v.Retried[1]
 					if v.CheckedAt.Before(d.CheckedAt) {
 						d.CheckedAt = v.CheckedAt
 					}
@@ -180,7 +188,9 @@ func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func()
 		var wg sync.WaitGroup
 		if plan.General {
 			wg.Go(func() {
+				start := time.Now()
 				v4, err := netwatch.PublicIP(ctx, c.IPServices, httpTimeout, false)
+				res.RouteTime[0] = time.Since(start)
 				res.IP, res.Votes, res.Others, res.Err = v4.IP, v4.Votes, v4.Others, err
 				if err == nil {
 					res.Country = r.geo.Country(ctx, v4.IP, httpTimeout)
@@ -188,7 +198,9 @@ func (r *Runner) probe(c *config.Config, id uint64, plan guard.ProbePlan) func()
 			})
 			if c.CheckIPv6 {
 				wg.Go(func() {
+					start := time.Now()
 					v6, err := netwatch.PublicIP(ctx, c.IPv6Services, httpTimeout, true)
+					res.RouteTime[1] = time.Since(start)
 					if err == nil {
 						res.IP6 = v6.IP
 						res.IPv6Conflicting = len(v6.Others) != 0

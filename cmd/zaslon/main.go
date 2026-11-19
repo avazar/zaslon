@@ -159,6 +159,7 @@ func run(tray bool) {
 
 	if !tray {
 		r.G.OnChange(func(snap guard.Snapshot, evs []guard.Event) {
+			srv.ObserveRoutes(snap)
 			stats.Record(snap.Counters, time.Now())
 			ui.HeadlessRender(snap, evs)
 		})
@@ -166,7 +167,7 @@ func run(tray bool) {
 		stop()
 		return
 	}
-	t := &ui.Tray{G: r.G, Version: version, OnQuit: stop, UpdateCheck: cfg.UpdateCheck, Stats: stats}
+	t := &ui.Tray{G: r.G, Version: version, OnQuit: stop, UpdateCheck: cfg.UpdateCheck, Stats: stats, ObserveRoutes: srv.ObserveRoutes}
 	srv.UpdateAvailable, srv.InstallUpdate = t.UpdateAvailable, t.InstallUpdate
 	go func() {
 		<-sig

@@ -91,6 +91,10 @@ type CheckWarning struct {
 }
 
 type Snapshot struct {
+	RoutesSince     time.Time
+	RouteTime       [2]time.Duration
+	RouteProxy      string
+	Votes           int
 	DomainCountry   string    // Display only: a recent service measurement of the same IPv4.
 	MeasuredAt      time.Time // start of the last accepted general measurement
 	Status          Status    // the worst of the groups
@@ -121,6 +125,7 @@ type Snapshot struct {
 
 func (g *Guard) snapshot(now time.Time) Snapshot {
 	s := Snapshot{
+		RoutesSince: g.routesSince, RouteTime: g.routeTime, RouteProxy: g.routeProxy, Votes: g.votes,
 		Status: OK, MeasuredAt: g.measuredAt,
 		IP: g.ip, Country: g.country, IP6: g.ip6, Country6: g.cc6, Others: append([]string(nil), g.others...),
 		DNS: g.dns, DNSCountry: g.dnsCC, NetID: g.netID,

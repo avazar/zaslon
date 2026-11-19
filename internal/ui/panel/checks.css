@@ -1,0 +1,59 @@
+.nc { container-type: inline-size; }
+.nc-section-title, .nc-profile-head, .nc-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.nc h3, .nc dl, .nc dd { margin:0; }
+.nc h3 { font-size:15px; font-weight:600; }
+.nc small { display:block; font-size:12px; color:var(--muted); font-weight:400; }
+.nc-summary { display:flex; align-items:center; gap:12px; margin:0 0 24px; padding:12px 16px; border-radius:10px; background:var(--soft); }
+.nc-summary svg { width:20px; height:20px; flex:none; }
+.nc-summary.good { background:var(--ok-bg); }
+.nc-summary.good svg, .nc-mark.nc-level-0 { color:var(--ok); }
+.nc-summary.nc-level-2 { background:var(--warn-bg); }
+.nc-summary.nc-level-2 svg, .nc-mark.nc-level-2 { color:var(--warn); }
+.nc-summary.nc-level-3 { background:var(--bad-bg); }
+.nc-summary.nc-level-3 svg, .nc-mark.nc-level-3, .nc-error { color:var(--bad); }
+.nc-routes, .nc-profile { overflow:hidden; }
+.nc-routes { margin:8px 0 20px; }
+.nc-grid { display:grid; grid-template-columns:minmax(0,1.15fr) repeat(2,minmax(0,1fr)) minmax(96px,.95fr) 9px; align-items:center; gap:10px; padding:10px 14px; }
+.nc-grid > *, .nc-detail, .nc-profile, .nc-summary, .nc-direct { min-width:0; overflow-wrap:anywhere; }
+.nc-head, .nc-profile-head { background:var(--soft); }
+.nc-head { font-size:12px; color:var(--muted); padding-block:7px; }
+.nc-routes summary { list-style:none; border-top:1px solid var(--line); cursor:pointer; }
+.nc-routes summary::-webkit-details-marker { display:none; }
+.nc-routes summary:after { content:""; width:6px; height:6px; border:solid var(--muted); border-width:1.5px 1.5px 0 0; transform:rotate(45deg); }
+.nc-routes details[open]>summary:after { transform:rotate(135deg); }
+.nc-routes summary:hover, .nc-routes details[open]>summary { background:var(--soft); }
+.nc-host { font-weight:600; }
+.nc-cell, .nc-latency { font-variant-numeric:tabular-nums; }
+.nc-cell small { padding-inline-start:17px; }
+.nc-mark svg { width:13px; height:13px; stroke-width:2.7; vertical-align:-1px; margin-inline-end:4px; }
+.nc-latency { display:grid; font-size:12px; gap:2px; }
+.nc-detail { border-top:1px solid var(--line); padding:10px 14px; display:grid; gap:4px; user-select:text; }
+.nc-profile-head, .nc-foot { padding:10px 16px; }
+.nc-profile-head select { max-width:100%; padding:5px 8px; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:7px; font:13px/1.4 ui-monospace,monospace; }
+.nc-report { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(160px,.8fr); align-items:center; gap:18px; padding:16px 20px; }
+.nc-report strong { font-size:21px; font-weight:600; }
+.nc-meta { margin-top:6px; color:var(--muted); font-size:13px; }
+.nc-meta code { background:var(--soft); border-radius:5px; padding:2px 5px; }
+.nc-report dl { display:grid; gap:6px; border-inline-start:1px solid var(--line); padding-inline-start:18px; }
+.nc-report dl div { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.nc-report dd { color:var(--muted); font-size:12px; }
+.nc-report .nc-listed { color:var(--accent); background:color-mix(in srgb,var(--accent) 10%,var(--card)); padding:2px 8px; border-radius:20px; }
+.nc-foot { border-top:1px solid var(--line); }
+.nc-profile .nc-error { margin:0; padding:0 16px 12px; }
+.nc-direct { margin-top:16px; padding:12px 0; border-top:1px solid var(--line); }
+.nc-direct summary { cursor:pointer; font-weight:500; }
+.nc-direct p, .nc-direct div { margin:8px 0; }
+@container (max-width: 560px) {
+  .nc-grid { grid-template-columns:repeat(2,minmax(0,1fr)) 8px; }
+  .nc-routes .nc-head { display:none; }
+  .nc-host { grid-column:1/3; }
+  .nc-cell { grid-row:2; }
+  .nc-cell:nth-child(2):before { content:"IPv4"; }
+  .nc-cell:nth-child(3):before { content:"IPv6"; }
+  .nc-cell:before { display:block; color:var(--muted); font-size:12px; }
+  .nc-latency { grid-column:1/4; grid-row:3; display:flex; flex-wrap:wrap; gap:4px 14px; }
+  .nc-latency:before { content:attr(aria-label); color:var(--muted); }
+  .nc-routes summary:after { grid-column:3; grid-row:1; }
+  .nc-report { grid-template-columns:1fr; gap:12px; }
+  .nc-report dl { border-inline-start:0; border-top:1px solid var(--line); padding:12px 0 0; }
+}

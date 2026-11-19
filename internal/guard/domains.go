@@ -15,16 +15,19 @@ func (g *Guard) domainMaxAge() time.Duration {
 }
 
 type DomainResult struct {
-	Endpoint    string    `json:"endpoint"`
-	IP          string    `json:"ip"`
-	Country     string    `json:"country"`
-	IP6         string    `json:"ip6"`
-	Country6    string    `json:"country6"`
-	Error       string    `json:"error,omitempty"`
-	IPv6Error   string    `json:"ipv6Error,omitempty"`
-	Timeout     bool      `json:"timeout,omitempty"`
-	IPv6Timeout bool      `json:"ipv6Timeout,omitempty"`
-	CheckedAt   time.Time `json:"checkedAt"`
+	Retried     [2]bool          `json:"-"` // a timed-out attempt immediately preceded this result
+	RouteTime   [2]time.Duration `json:"-"`
+	RouteProxy  string           `json:"-"`
+	Endpoint    string           `json:"endpoint"`
+	IP          string           `json:"ip"`
+	Country     string           `json:"country"`
+	IP6         string           `json:"ip6"`
+	Country6    string           `json:"country6"`
+	Error       string           `json:"error,omitempty"`
+	IPv6Error   string           `json:"ipv6Error,omitempty"`
+	Timeout     bool             `json:"timeout,omitempty"`
+	IPv6Timeout bool             `json:"ipv6Timeout,omitempty"`
+	CheckedAt   time.Time        `json:"checkedAt"`
 }
 
 type domainFamily struct {

@@ -45,11 +45,13 @@ type Server struct {
 	UpdateAvailable func() string
 	InstallUpdate   func()
 
-	token   string
-	addr    string
-	panelMu sync.Mutex
-	panel   *panelLease
-	closed  chan struct{}
+	token     string
+	addr      string
+	panelMu   sync.Mutex
+	panel     *panelLease
+	closed    chan struct{}
+	routes    routeStore
+	ipCacheMu sync.Mutex
 }
 
 const cookieName = "zaslon"
@@ -99,6 +101,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/state", s.state)
 	mux.HandleFunc("GET /api/countries", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, countryList()) })
 	mux.HandleFunc("POST /api/do", s.do)
+	mux.HandleFunc("GET /api/routes", s.routeView)
+	mux.HandleFunc("POST /api/routes/check", s.runRoutes)
+	mux.HandleFunc("POST /api/routes/compare", s.compareRoutes)
+	mux.HandleFunc("GET /api/routes/ip", s.cachedIP)
+	mux.HandleFunc("POST /api/routes/ip", s.lookupIP)
 
 	srv := &http.Server{Handler: s.guardRequest(mux), ReadHeaderTimeout: 5 * time.Second}
 	s.closed = make(chan struct{})

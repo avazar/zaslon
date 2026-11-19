@@ -94,7 +94,9 @@ type ProbePlan struct {
 }
 
 type ProbeResult struct {
-	Retry           chan bool // buffered reply to a family timeout, after enforcement
+	RouteTime       [2]time.Duration // HTTP measurement only, before country lookup
+	RouteProxy      string           // opaque proxy identity for diagnostic presentation
+	Retry           chan bool        // buffered reply to a family timeout, after enforcement
 	Part            ProbePart
 	Sample          DomainResult
 	SampleIPv6      bool
@@ -192,6 +194,9 @@ type Guard struct {
 	earlyDenials        map[string]domainHold
 	generalReady        bool
 	measuredAt          time.Time
+	routesSince         time.Time
+	routeTime           [2]time.Duration
+	routeProxy          string
 	dnsWarned           string
 	lastIPv4, lastIPv6  exitEvidence
 	serviceEvidence     map[serviceSource]serviceEvidence
@@ -461,6 +466,7 @@ func (g *Guard) cancelCurrentProbe() {
 func (g *Guard) invalidate(now time.Time) { g.invalidateFor(now, NetChanged) }
 
 func (g *Guard) invalidateFor(now time.Time, why Reason) {
+	g.routesSince = now
 	g.cancelCurrentProbe()
 	g.verified = false
 	g.domains = nil
@@ -566,6 +572,7 @@ func (g *Guard) HandleProbe(now time.Time, r ProbeResult) {
 }
 
 func (g *Guard) acceptGeneral(now time.Time, r ProbeResult) {
+	g.routeTime, g.routeProxy = r.RouteTime, r.RouteProxy
 	g.measuredAt = g.probeStarted
 	g.rememberGeneral(r)
 	if r.NetID != g.netID {
