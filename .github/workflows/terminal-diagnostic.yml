@@ -32,3 +32,13 @@ jobs:
           echo "CODEX_TEST_BIN=$binary" >> "$GITHUB_ENV"
       - name: Check real Codex in Bash with an empty profile
         run: timeout 55s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" "$CODEX_TEST_BIN"
+      - name: Check published Zaslon on failed and restored IP probes
+        if: always() && env.CODEX_TEST_BIN != ''
+        run: |
+          mkdir "$RUNNER_TEMP/zaslon-release"
+          cd "$RUNNER_TEMP/zaslon-release"
+          curl -fsSL --retry 2 -O https://github.com/avazar/zaslon/releases/download/v1.4.0/zaslon-1.4.0-linux-amd64.tar.gz
+          echo '6869073cb2d9338bb43c88f308252540b31e2f03483340b5bbf04a88c16c24d9  zaslon-1.4.0-linux-amd64.tar.gz' | sha256sum -c
+          tar xzf zaslon-1.4.0-linux-amd64.tar.gz
+          ./zaslon version
+          timeout 120s python3 -u "$GITHUB_WORKSPACE/tools/terminal-check/release_check.py" "$PWD/zaslon" "$CODEX_TEST_BIN"

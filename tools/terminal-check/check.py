@@ -57,11 +57,21 @@ try:
     target = until("foreground child", lambda: (g if (g := os.tcgetpgrp(master)) > 0 and g != shell else None))
     until("child executable", lambda: Path(f"/proc/{target}/comm").read_text().strip() == name)
     if name == "codex":
-        until("Codex drew its screen", lambda: b"Codex" in transcript or b"OpenAI" in transcript, 15)
+        until("Codex sign-in screen", lambda: b"Choose how you want to use Codex" in transcript, 20)
         collect(1)
         print("Codex startup screen:", repr(bytes(transcript[-1000:])))
         print("Mouse tracking enables:", re.findall(rb"\x1b\[\?(100[0236])h", transcript))
-    with subprocess.Popen([controller, str(shell), str(target), name],
+        # Establish an interactive baseline on the offline welcome menu.
+        offset = len(transcript)
+        os.write(master, b"\x1b[B")
+        collect(0.65)
+        print("Before pause: Down output =", repr(bytes(transcript[offset:])[:360]))
+        offset = len(transcript)
+        os.write(master, b"\x1b[A")
+        collect(0.65)
+        print("Before pause: Up output =", repr(bytes(transcript[offset:])[:360]))
+    command = ([sys.executable, controller] if controller.endswith(".py") else [controller])
+    with subprocess.Popen(command + [str(shell), str(target), name],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as control:
         assert control.stdout.readline().strip() == "paused"
         until("foreground returned to Bash", lambda: os.tcgetpgrp(master) == shell)
@@ -77,11 +87,17 @@ try:
         control.stdin.write("resume\n")
         control.stdin.flush()
         assert control.stdout.readline().strip() == "resumed"
-        assert control.wait(timeout=5) == 0
+        assert control.wait(timeout=15) == 0
     collect(1.2)
     print("After Zaslon Resume: foreground =", os.tcgetpgrp(master),
           "bash =", shell, "job =", target, "job state =", state(target))
     if os.tcgetpgrp(master) == shell:
+        if name == "codex":
+            offset = len(transcript)
+            os.write(master, b"\x1b[<35;42;11M")
+            collect(0.15)
+            print("Simulated mouse input before fg:", repr(bytes(transcript[offset:])))
+            os.write(master, b"\x15")
         offset = len(transcript)
         os.write(master, b"jobs -l\n")
         collect(0.5)
@@ -102,7 +118,8 @@ try:
         collect(0.7)
         print("After fg: foreground =", os.tcgetpgrp(master) == target,
               "output bytes following Down =", len(transcript) - offset,
-              "draw commands =", b"\x1b[" in transcript[offset:])
+              "draw commands =", b"\x1b[" in transcript[offset:],
+              "output =", repr(bytes(transcript[offset:])[:360]))
 finally:
     # All of these processes were created in this private test session.
     for entry in Path("/proc").glob("[0-9]*"):
