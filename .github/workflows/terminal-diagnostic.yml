@@ -22,10 +22,13 @@ jobs:
       - name: Get official Codex CLI 0.170.0
         run: |
           cd "$RUNNER_TEMP"
-          curl -fsSL --retry 2 -o codex.tar.gz https://github.com/openai/codex/releases/download/rust-v0.170.0/codex-x86_64-unknown-linux-musl.tar.gz
-          echo 'd054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5  codex.tar.gz' | sha256sum -c
-          tar xzf codex.tar.gz
-          install -m 755 codex-x86_64-unknown-linux-musl codex
-          ./codex --version
+          curl -fsSL --retry 2 -o codex.tar.gz https://github.com/openai/codex/releases/download/rust-v0.170.0/codex-package-x86_64-unknown-linux-musl.tar.gz
+          echo 'a77ff87be7ba809d715728270a78f5ce3527dc07529416d1ef8929b90b8475eb  codex.tar.gz' | sha256sum -c
+          mkdir package
+          tar xzf codex.tar.gz -C package
+          find package -maxdepth 5 -type f | head -50
+          binary=$(find "$RUNNER_TEMP/package" -name codex -type f -perm /111 -print -quit)
+          "$binary" --version
+          echo "CODEX_TEST_BIN=$binary" >> "$GITHUB_ENV"
       - name: Check real Codex in Bash with an empty profile
-        run: timeout 55s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" "$RUNNER_TEMP/codex"
+        run: timeout 55s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" "$CODEX_TEST_BIN"

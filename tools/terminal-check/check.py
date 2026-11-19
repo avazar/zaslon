@@ -16,7 +16,7 @@ from pathlib import Path
 
 controller, program = sys.argv[1:]
 name = Path(program).name
-profile = tempfile.TemporaryDirectory()
+profile = tempfile.TemporaryDirectory(dir=os.environ.get("RUNNER_TEMP"))
 shell, master = pty.fork()
 if shell == 0:
     os.chdir(profile.name)
@@ -66,6 +66,14 @@ try:
         assert control.stdout.readline().strip() == "paused"
         until("foreground returned to Bash", lambda: os.tcgetpgrp(master) == shell)
         print("Paused: Bash owns the foreground, job state =", state(target))
+        if name == "codex":
+            modes = re.findall(rb"\x1b\[\?1003([hl])", transcript)
+            if modes and modes[-1] == b"h":
+                offset = len(transcript)
+                os.write(master, b"\x1b[<35;42;11M")
+                collect(0.25)
+                print("Mouse motion while paused: echo =", repr(bytes(transcript[offset:])))
+                os.write(master, b"\x15")
         control.stdin.write("resume\n")
         control.stdin.flush()
         assert control.stdout.readline().strip() == "resumed"
