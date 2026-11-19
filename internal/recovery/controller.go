@@ -49,10 +49,13 @@ func Open(dir string, backend procs.Controller) (*Controller, error) {
 	if err := json.Unmarshal(b, &j); err != nil {
 		return nil, fmt.Errorf("recovery journal: %w", err)
 	}
-	if j.Version != 1 || j.Entries == nil {
+	if (j.Version != 1 && j.Version != 2) || j.Entries == nil {
 		return nil, errors.New("unsupported recovery journal; preserved for inspection")
 	}
 	for pid, e := range j.Entries {
+		if e.Group != nil && (j.Version != 2 || e.Group.Path == "" || e.Group.Inode == 0) {
+			return nil, errors.New("invalid freezer journal entry; preserved for inspection")
+		}
 		if pid <= 0 || e.Process.PID != pid || e.Process.Created == "" || (e.Phase != "freezing" && e.Phase != "frozen" && e.Phase != "resuming") {
 			return nil, errors.New("invalid recovery entry; journal preserved")
 		}
@@ -73,7 +76,15 @@ func (c *Controller) Entries() []Entry {
 }
 
 func (c *Controller) save() error {
-	b, err := json.MarshalIndent(journal{Version: 1, Entries: c.entries}, "", "  ")
+	version := 1
+	for _, e := range c.entries {
+		if e.Group != nil {
+			// A signal-only recovery binary must never discard a kernel freeze.
+			version = 2
+			break
+		}
+	}
+	b, err := json.MarshalIndent(journal{Version: version, Entries: c.entries}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -100,6 +111,15 @@ func (c *Controller) ConfirmedSuspensions() ([]procs.Proc, error) {
 		}
 		if p, ok := alive[pid]; !ok || p.Created == "" || !procs.SameProcess(p, e.Process) {
 			return nil, fmt.Errorf("PID %d: process identity unavailable; protection recovery refused", pid)
+		}
+		if e.Group != nil {
+			backend, ok := c.os.(procs.GroupController)
+			if !ok {
+				return nil, errors.New("Linux cgroup recovery unavailable")
+			}
+			if err := backend.CheckGroup(e.Process, e.Group); err != nil {
+				return nil, err
+			}
 		}
 		p := e.Process
 		p.PolicyIDs = append([]string(nil), p.PolicyIDs...)

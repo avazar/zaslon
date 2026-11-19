@@ -163,6 +163,12 @@ func (c *osController) FreezeTracked(p Proc, remember func(*FreezerGroup) error)
 		if stopped {
 			return errors.Join(ErrNotApplied, ErrAlreadyStopped)
 		}
+		if err := target.send(0); err != nil {
+			if errors.Is(err, unix.ESRCH) {
+				return nil
+			}
+			return errors.Join(ErrNotApplied, err)
+		}
 		fallback := func() error { return sendUnixSignal(target, syscall.SIGSTOP) }
 		parent, err := unifiedGroup(p.PID)
 		if err != nil || strings.HasPrefix(filepath.Base(parent), ".zaslon-") {
@@ -236,11 +242,25 @@ func (c *osController) ReleaseGroup(p Proc, g *FreezerGroup) error {
 		}
 		return errors.Join(ErrNotApplied, errors.New("unexpected freezer group membership"))
 	}
-	born, err := processIdentity(p.PID)
-	if err != nil || born != p.Created {
-		return errors.Join(ErrNotApplied, errors.New("freezer process identity changed"), err)
+	// Move the single verified member out while the leaf is still frozen.
+	// Its next fork inherits the original group, and foreign signal stops survive.
+	if err := moveMember(p, g.Path, filepath.Dir(g.Path)); err != nil {
+		if (errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.ESRCH)) && c.ForgetGroup(p, g) == nil {
+			return nil
+		}
+		return errors.Join(ErrNotApplied, err)
 	}
-	return g.restore(p)
+	return os.Remove(g.Path)
+}
+
+func (c *osController) CheckGroup(p Proc, g *FreezerGroup) error {
+	if err := g.check(p); err != nil {
+		return err
+	}
+	if !exclusive(g.Path, p.PID) {
+		return errors.New("unexpected freezer group membership")
+	}
+	return waitFrozen(g.Path)
 }
 
 func (c *osController) ForgetGroup(p Proc, g *FreezerGroup) error {

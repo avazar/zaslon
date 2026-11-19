@@ -9,6 +9,7 @@ type FreezerGroup struct {
 
 type GroupController interface {
 	FreezeTracked(Proc, func(*FreezerGroup) error) (*FreezerGroup, error)
+	CheckGroup(Proc, *FreezerGroup) error
 	ReleaseGroup(Proc, *FreezerGroup) error
 	ForgetGroup(Proc, *FreezerGroup) error
 }

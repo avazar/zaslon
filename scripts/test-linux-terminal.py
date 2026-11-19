@@ -8,7 +8,6 @@ import fcntl
 import json
 import os
 import pty
-import select
 import shlex
 import shutil
 import signal
@@ -161,12 +160,15 @@ else:
         work = root / (custom.name + "-home")
         wait("fixture descendants", lambda: len(list(work.glob("pid-*"))) == 3)
         fixture_pids = {p.read_text() for p in work.glob("pid-*")}
+        # Both programs can paint their onboarding screen before entering the
+        # keyboard event loop. Establish a working baseline before any fault.
+        time.sleep(1)
         def keyboard():
             ct.key(b"\x1b[B", b"> 2. ")
             ct.key(b"\x1b[A", b"> 1. ")
             # Claude redraws the theme preview when the selected theme changes.
-            at.key(b"\x1b[B", b"\x1b[")
-            at.key(b"\x1b[A", b"\x1b[")
+            at.key(b"\x1b[B", b"theme")
+            at.key(b"\x1b[A", b"theme")
             ft.key(b"ping\n", b"accepted ping")
         keyboard()
         for cycle in range(2):
@@ -214,9 +216,21 @@ else:
                 return len(failures) >= start + 3
             wait("three consecutive failed probes", verify)
             count = len(entries())
+            groups = [Path(e["freezer"]["path"]) for e in entries().values() if e.get("freezer")]
+            if cycle == 0:
+                child = read_json(profile / "state.json")["pid"]
+                assert Path(f"/proc/{child}/exe").resolve() == guard_binary
+                assert int(Path(f"/proc/{child}/stat").read_text().rsplit(") ", 1)[1].split()[1]) == guard.pid
+                os.kill(child, signal.SIGKILL)
+                def restarted():
+                    verify()
+                    return read_json(profile / "state.json").get("pid", child) != child and len(failures) > start + 3
+                wait("supervisor restart preserved all holds", restarted)
+                print(f"{mode}: guard crash and restart while offline preserved all {count} holds", flush=True)
             unavailable.clear()
             wait("all holds released", lambda: not entries())
             keyboard()
+            assert not any(group.exists() for group in groups)
             wait("heartbeats resumed", lambda: all(p.read_bytes() != old for p, old in zip(sorted(work.glob("tick-*")), ticks)))
             print(f"{mode} cycle {cycle+1}: {count} stopped processes, 3 failed probes, both menus and fixture input recovered", flush=True)
     finally:
