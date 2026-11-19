@@ -7,7 +7,11 @@ permissions:
 jobs:
   terminal:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [cgroup, bash]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -15,42 +19,29 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
-      - name: Build the process controller from Zaslon 1.4.0
-        run: go build -o "$RUNNER_TEMP/controller" ./tools/terminal-check
-      - name: Check interactive Bash with cat
-        run: timeout 45s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" /bin/cat
-      - name: Get official Codex CLI 0.170.0
+      - name: Build guard and test Go packages
+        run: |
+          go build -o "$RUNNER_TEMP/zaslon" ./cmd/zaslon
+          go test ./...
+      - name: Prepare real console apps
         run: |
           cd "$RUNNER_TEMP"
           curl -fsSL --retry 2 -o codex.tar.gz https://github.com/openai/codex/releases/download/rust-v0.170.0/codex-package-x86_64-unknown-linux-musl.tar.gz
           echo 'a77ff87be7ba809d715728270a78f5ce3527dc07529416d1ef8929b90b8475eb  codex.tar.gz' | sha256sum -c
           mkdir package
           tar xzf codex.tar.gz -C package
-          find package -maxdepth 5 -type f | head -50
           binary=$(find "$RUNNER_TEMP/package" -name codex -type f -perm /111 -print -quit)
           "$binary" --version
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/cli" @anthropic-ai/claude-code@2.1.328
+          "$RUNNER_TEMP/cli/node_modules/.bin/claude" --version
           echo "CODEX_TEST_BIN=$binary" >> "$GITHUB_ENV"
-      - name: Check real Codex in Bash with an empty profile
-        run: timeout 55s python3 -u tools/terminal-check/check.py "$RUNNER_TEMP/controller" "$CODEX_TEST_BIN"
-      - name: Check published Zaslon on failed and restored IP probes
-        if: always() && env.CODEX_TEST_BIN != ''
+      - name: Verify real guard plus keyboard and descendants
+        env:
+          MODE: ${{ matrix.mode }}
         run: |
-          mkdir "$RUNNER_TEMP/zaslon-release"
-          cd "$RUNNER_TEMP/zaslon-release"
-          curl -fsSL --retry 2 -O https://github.com/avazar/zaslon/releases/download/v1.4.0/zaslon-1.4.0-linux-amd64.tar.gz
-          echo '6869073cb2d9338bb43c88f308252540b31e2f03483340b5bbf04a88c16c24d9  zaslon-1.4.0-linux-amd64.tar.gz' | sha256sum -c
-          tar xzf zaslon-1.4.0-linux-amd64.tar.gz
-          ./zaslon version
-          timeout 120s python3 -u "$GITHUB_WORKSPACE/tools/terminal-check/release_check.py" "$PWD/zaslon" "$CODEX_TEST_BIN"
-      - name: Assert strict pause and automatic keyboard recovery in Bash
-        run: |
-          export CHECK_FOREGROUND_BASH="$PWD/tools/terminal-check/foreground.bash"
-          timeout 120s python3 -u tools/terminal-check/release_check.py "$RUNNER_TEMP/zaslon-release/zaslon" "$CODEX_TEST_BIN"
-      - name: Check direct absolute path with the kernel freezer in a delegated CI unit
-        run: |
-          group=$(sed -n 's/^0:://p' /proc/self/cgroup)
-          echo "Default runner group=$group"
-          if test -w "/sys/fs/cgroup$group/cgroup.procs" && test -w "/sys/fs/cgroup$group"; then echo "Default group writable"; else echo "Default group lacks delegation"; fi
-          sudo systemd-run --wait --pipe --collect --unit="zaslon-tty-test-$GITHUB_RUN_ID" --property="User=$(id -un)" --property=Delegate=yes --working-directory="$PWD" \
-            --setenv="CHECK_CGROUP_FREEZER=1" --setenv="RUNNER_TEMP=$RUNNER_TEMP" --setenv="CODEX_TEST_PACKAGE=$RUNNER_TEMP/package" \
-            /usr/bin/timeout 80s /usr/bin/python3 -u tools/terminal-check/check.py "$PWD/tools/terminal-check/freezer_probe.py" "$CODEX_TEST_BIN"
+          args=(/usr/bin/timeout 170s /usr/bin/python3 -u scripts/test-linux-terminal.py "$RUNNER_TEMP/zaslon" "$MODE" "$CODEX_TEST_BIN" "$RUNNER_TEMP/cli/node_modules/.bin/claude")
+          if test "$MODE" = cgroup; then
+            sudo systemd-run --wait --pipe --collect --unit="zaslon-tty-test-$GITHUB_RUN_ID" --property="User=$(id -un)" --property=Delegate=yes --working-directory="$PWD" --setenv=GITHUB_ACTIONS=true --setenv="RUNNER_TEMP=$RUNNER_TEMP" "${args[@]}"
+          else
+            "${args[@]}"
+          fi

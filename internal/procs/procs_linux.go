@@ -5,9 +5,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-type osController struct{ own string }
+type osController struct {
+	own            string
+	fallbackNotice func()
+	noticeOnce     sync.Once
+}
+
+func (c *osController) OnTerminalFallback(notice func()) { c.fallbackNotice = notice }
 
 func New() Controller { return &osController{own: executablePath()} }
 
