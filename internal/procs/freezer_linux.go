@@ -202,8 +202,10 @@ func (c *osController) FreezeTracked(p Proc, remember func(*FreezerGroup) error)
 			return fallback()
 		}
 		born, nowStopped, err := target.snapshot()
+		requested := false
 		if err == nil && born == p.Created && !nowStopped && exclusive(dir, p.PID) {
-			if groupWrite(dir, "cgroup.freeze", "1") == nil && waitFrozen(dir) == nil && exclusive(dir, p.PID) {
+			requested = groupWrite(dir, "cgroup.freeze", "1") == nil
+			if requested && waitFrozen(dir) == nil && exclusive(dir, p.PID) {
 				used = group
 				return nil
 			}
@@ -215,6 +217,11 @@ func (c *osController) FreezeTracked(p Proc, remember func(*FreezerGroup) error)
 			stopErr = errors.Join(ErrNotApplied, ErrAlreadyStopped)
 		} else {
 			stopErr = fallback()
+			if stopErr != nil && requested {
+				// The journal retains the uncertain intent. Keep the freezer
+				// armed if the alternative stop could not be installed.
+				return fmt.Errorf("strict signal stop failed; retaining freezer hold: %v", stopErr)
+			}
 		}
 		if err := group.restore(p); err != nil {
 			return fmt.Errorf("freezer rollback: %v (signal: %v)", err, stopErr)
@@ -272,5 +279,13 @@ func (c *osController) ForgetGroup(p Proc, g *FreezerGroup) error {
 		return err
 	}
 	// rmdir only succeeds for an empty group. Never thaw a populated orphan.
-	return os.Remove(g.Path)
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for {
+		err = os.Remove(g.Path)
+		if !errors.Is(err, unix.EBUSY) || time.Now().After(deadline) {
+			return err
+		}
+		// SIGKILL may still be completing on another CPU.
+		time.Sleep(5 * time.Millisecond)
+	}
 }

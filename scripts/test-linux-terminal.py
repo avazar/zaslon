@@ -167,8 +167,8 @@ else:
             ct.key(b"\x1b[B", b"> 2. ")
             ct.key(b"\x1b[A", b"> 1. ")
             # Claude redraws the theme preview when the selected theme changes.
-            at.key(b"\x1b[B", b"theme")
-            at.key(b"\x1b[A", b"theme")
+            at.key(b"\x1b[B", "❯\x1b[6GDark mode".encode())
+            at.key(b"\x1b[A", "❯\x1b[6GAuto".encode())
             ft.key(b"ping\n", b"accepted ping")
         keyboard()
         for cycle in range(2):

@@ -41,6 +41,8 @@ irm https://raw.githubusercontent.com/avazar/zaslon/dev/install.ps1 | iex
 curl -fsSL https://raw.githubusercontent.com/avazar/zaslon/dev/install.sh | sh
 ```
 
+На Linux Zaslon автоматически использует cgroup v2, если может создать отдельную группу для процесса. Если журнал сообщает о паузе сигналом, выполните в Bash `source <(zaslon bash-init)` перед запуском `codex` или `claude`. После снятия паузы клавиатура снова будет работать. Для других команд перечислите их имена, например `source <(zaslon bash-init codex claude aider)`.
+
 ### Первая настройка
 
 1. Подключитесь к нужному VPN. В разделе **«Разрешено»** добавьте известный вам IP, подсеть или страну выхода. Если у VPN постоянный IP, одно разрешение на этот адрес точнее, чем разрешение на целую страну.

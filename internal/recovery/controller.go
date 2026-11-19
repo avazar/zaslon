@@ -282,8 +282,13 @@ func (c *Controller) Kill(p procs.Proc) error {
 		return nil
 	}
 	if e.Group != nil {
-		// SIGKILL is asynchronous. Prune after the target has actually exited.
-		return nil
+		backend, ok := c.os.(procs.GroupController)
+		if !ok {
+			return errors.New("Linux cgroup recovery unavailable")
+		}
+		if err := backend.ForgetGroup(e.Process, e.Group); err != nil {
+			return err
+		}
 	}
 	delete(c.entries, p.PID)
 	if err := c.save(); err != nil {
