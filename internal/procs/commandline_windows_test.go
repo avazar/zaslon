@@ -156,8 +156,15 @@ func TestWindowsInterpreterEntryScript(t *testing.T) {
 	} {
 		t.Run(tc.name+"/"+strings.Join(tc.args, " "), func(t *testing.T) {
 			line := windows.ComposeCommandLine(append([]string{`C:\Tools\` + tc.name}, tc.args...))
-			if got := windowsInterpreterScript(tc.name, line); got != tc.want {
-				t.Fatalf("entry script=%q, want=%q", got, tc.want)
+			p := Proc{Name: tc.name, Args: line, ScriptPath: windowsInterpreterScript(tc.name, line)}
+			if p.ScriptPath != tc.want {
+				t.Fatalf("entry script=%q, want=%q", p.ScriptPath, tc.want)
+			}
+			for id, script := range map[string]string{"claude": claude, "codex": codex} {
+				preset, _ := PresetByID(id)
+				if got := preset.Windows.Match(p); got != (tc.want == script) {
+					t.Errorf("preset %s matched=%v for %q", id, got, line)
+				}
 			}
 		})
 	}

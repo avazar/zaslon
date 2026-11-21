@@ -3,6 +3,7 @@ package procs
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -15,27 +16,34 @@ import (
 // ErrNotApplied means failure occurred before the OS operation took effect.
 var ErrNotApplied = errors.New("process operation was not applied")
 
+// ErrProcessGone is a definite no-op, including replacement of the target PID.
+var ErrProcessGone = fmt.Errorf("process instance is gone: %w", ErrNotApplied)
+
 // ErrAlreadyStopped prevents adopting another tool's existing Unix stop.
 var ErrAlreadyStopped = errors.New("process is already stopped by another owner")
 
 // Proc is one running process.
 type Proc struct {
-	PID        int
-	Created    string // OS process birth identity; never infer ownership from PID alone
-	PPID       int
-	Name       string   // executable file name: "Claude", "claude.exe"
-	Path       string   // full executable path, may be empty if the OS hides it
-	Args       string   // command line, only collected for interpreters (node, python...)
-	ScriptPath string   // identified interpreter entry script (Windows), not arbitrary arguments
-	App        string   // which protected app it belongs to (display name)
-	AppID      string   // its preset id or lowercased custom name
-	PolicyIDs  []string // matching app and ancestor policies; one owner controls suspension
-	Control    bool     `json:"-"` // verified own control process/private panel member, never a user app
-	control    controlRole
+	PID            int
+	Created        string // OS process birth identity; never infer ownership from PID alone
+	Sequence       uint64 `json:",omitempty"` // Windows kernel process sequence; absent in older journals
+	parentSequence uint64 // verified only for the current Windows snapshot
+	PPID           int
+	Name           string   // executable file name: "Claude", "claude.exe"
+	Path           string   // full executable path, may be empty if the OS hides it
+	Args           string   // command line, only collected for interpreters (node, python...)
+	ScriptPath     string   // identified interpreter entry script (Windows), not arbitrary arguments
+	App            string   // which protected app it belongs to (display name)
+	AppID          string   // its preset id or lowercased custom name
+	PolicyIDs      []string // matching app and ancestor policies; one owner controls suspension
+	Control        bool     `json:"-"` // verified own control process/private panel member, never a user app
+	control        controlRole
 }
 
 // SameProcess also works for synthetic processes used by pure guard tests.
-func SameProcess(a, b Proc) bool { return a.PID == b.PID && a.Created == b.Created }
+func SameProcess(a, b Proc) bool {
+	return a.PID == b.PID && a.Created == b.Created && (a.Sequence == 0 || b.Sequence == 0 || a.Sequence == b.Sequence)
+}
 
 // A parent PID can outlive the process it identified, particularly on Windows.
 // Reject only impossible ancestry. Equal or unavailable creation times cannot
@@ -273,7 +281,15 @@ func Filter(all []Proc, ts []Target, self int) []Proc {
 		pid := queue[0]
 		queue = queue[1:]
 		for _, c := range children[pid] {
-			if c <= 1 || predatesParent(byPID[c].Created, byPID[pid].Created) {
+			child, parent := byPID[c], byPID[pid]
+			if c <= 1 {
+				continue
+			}
+			if child.Sequence != 0 || parent.Sequence != 0 {
+				if parent.Sequence == 0 || child.parentSequence != parent.Sequence || child.Sequence <= parent.Sequence {
+					continue
+				}
+			} else if predatesParent(child.Created, parent.Created) {
 				continue
 			}
 			if _, seen := app[c]; !seen {

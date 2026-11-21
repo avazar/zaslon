@@ -92,9 +92,7 @@ func markPanelMembers(all []Proc) {
 		// to the job. Cover only that Edge child of a verified panel owner,
 		// with a birth later than its parent; never an arbitrary guard subtree.
 		if owner, ok := panels[p.PPID]; ok && strings.EqualFold(p.Name, "msedge.exe") {
-			parentBirth, e1 := strconv.ParseInt(owner.Created, 10, 64)
-			childBirth, e2 := strconv.ParseInt(p.Created, 10, 64)
-			if e1 == nil && e2 == nil && parentBirth > 0 && childBirth >= parentBirth {
+			if owner.Sequence != 0 && owner.Sequence == p.parentSequence && p.Sequence > owner.Sequence {
 				all[i].Control = true
 				continue
 			}

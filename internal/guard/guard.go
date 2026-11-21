@@ -1065,6 +1065,12 @@ func (g *Guard) enforceGroup(now time.Time, gr *group) {
 		if gr.status != OK || !g.processAllowed(p, now) {
 			if _, ok := gr.frozen[p.PID]; !ok {
 				err := g.d.Procs.Freeze(p)
+				// A clean no-op needs neither a frozen entry nor a failure alert.
+				// Joined journal write errors still require normal error handling.
+				if err == procs.ErrProcessGone {
+					g.operation("freeze", p, nil)
+					continue
+				}
 				g.operation("freeze", p, err)
 				if err == nil {
 					gr.frozen[p.PID] = p

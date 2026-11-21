@@ -169,9 +169,12 @@ func TestDirectPanelChildRequiresOwnerRoleAndBirthOrder(t *testing.T) {
 		{panelControl, "100", "99", false},
 		{guardControl, "100", "101", false},
 	} {
-		owner := Proc{PID: 2000000000, Created: tc.parent, Control: true, control: tc.role}
-		child := Proc{PID: 2000000001, PPID: owner.PID, Created: tc.child, Name: "msedge.exe"}
+		parentSeq, _ := strconv.ParseUint(tc.parent, 10, 64)
+		childSeq, _ := strconv.ParseUint(tc.child, 10, 64)
+		owner := Proc{PID: 2000000000, Created: "100", Sequence: parentSeq, Control: true, control: tc.role}
+		child := Proc{PID: 2000000001, PPID: owner.PID, Created: "100", Sequence: childSeq, Name: "msedge.exe"}
 		ps := []Proc{owner, child}
+		verifyWindowsParents(ps)
 		markPanelMembers(ps)
 		if ps[1].Control != tc.want {
 			t.Fatalf("role=%v birth=%s/%s: control=%v", tc.role, tc.parent, tc.child, ps[1].Control)

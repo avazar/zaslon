@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -155,6 +156,14 @@ func TestRealCrashAndRecovery(t *testing.T) {
 		if err := backend.Kill(wrong); err != nil {
 			t.Fatal(err)
 		}
+		wrong = p
+		wrong.Sequence++
+		if err := backend.Close(wrong); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Freeze(wrong); !errors.Is(err, procs.ErrProcessGone) || len(c.Entries()) != 0 {
+			t.Fatalf("stale freeze recorded ownership: err=%v, entries=%v", err, c.Entries())
+		}
 		before = size()
 		time.Sleep(200 * time.Millisecond)
 		if size() != before {
@@ -164,5 +173,16 @@ func TestRealCrashAndRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitGrowth(before) // also proves the mismatched identity was not terminated
+		if err := child.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = child.Wait()
+		if err := c.Freeze(p); !errors.Is(err, procs.ErrProcessGone) || len(c.Entries()) != 0 {
+			t.Fatalf("exited child recorded ownership: err=%v, entries=%v", err, c.Entries())
+		}
+		reopened, err := Open(dir, procs.New())
+		if err != nil || len(reopened.Entries()) != 0 {
+			t.Fatalf("stale freeze left a recovery record on disk: %v", err)
+		}
 	}
 }

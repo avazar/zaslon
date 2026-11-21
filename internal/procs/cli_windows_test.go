@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/avazar/zaslon/internal/config"
 	"golang.org/x/sys/windows"
 )
 
@@ -144,7 +143,14 @@ func startCLIFixture(t *testing.T, exe, dir, id, role string, args ...string) *e
 	return cmd
 }
 
-func TestWindowsCLIRecognitionAndDescendants(t *testing.T) {
+func TestWindowsNeutralProcessTree(t *testing.T) {
+	// Only this test controller knows the fixture's entry script.
+	target := Target{ID: "fixture", Name: "Fixture", Rule: Rule{Scripts: []string{"zaslon-test/worker.js"}}}
+	checkCLIProcessTree(t, "neutral", "v1/bun", []string{"run", "zaslon-test/worker.js"}, target)
+}
+
+func checkCLIProcessTree(t *testing.T, id, key string, args []string, target Target) {
+	t.Helper()
 	dir := t.TempDir()
 	self, err := os.Executable()
 	if err != nil {
@@ -154,125 +160,106 @@ func TestWindowsCLIRecognitionAndDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := map[string]string{}
-	for _, key := range []string{"v1/node", "v2/node", "v2/bun"} {
-		p := filepath.Join(dir, "Тест обновления", filepath.FromSlash(key)+".exe")
-		if err = os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+	exe := filepath.Join(dir, "Тест обновления", filepath.FromSlash(key)+".exe")
+	if err = os.MkdirAll(filepath.Dir(exe), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(exe, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := "--zaslon-test=" + id
+	root := startCLIFixture(t, exe, dir, id, "parent", append(args, marker)...)
+	control := startCLIFixture(t, exe, dir, id+"-control", "control", append([]string{"server.js", "--prompt"}, args...)...)
+	parentTick, childTick, controlTick := filepath.Join(dir, id+".parent.ticks"), filepath.Join(dir, id+".child.ticks"), filepath.Join(dir, id+"-control.control.ticks")
+	size := func(f string) int64 {
+		st, e := os.Stat(f)
+		if e != nil {
+			return 0
+		}
+		return st.Size()
+	}
+	var childPID int
+	waitCLIFixture(t, "heartbeat and child", func() bool {
+		b, _ := os.ReadFile(filepath.Join(dir, id+".child.pid"))
+		childPID, _ = strconv.Atoi(string(b))
+		return childPID > 0 && size(parentTick) > 0 && size(childTick) > 0 && size(controlTick) > 0
+	})
+	c := New().(*osController)
+	// A stale cache entry simulates PID reuse; it must not supply old args.
+	c.cache[root.Process.Pid] = cached{created: -1, path: "wrong.exe", args: "old arguments", script: "wrong.js", argsRead: true}
+	all, err := c.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := map[int]Proc{}
+	for _, p := range all {
+		if p.PID == root.Process.Pid || p.PID == childPID || p.PID == control.Process.Pid {
+			if p.Created == "" || !strings.EqualFold(p.Path, exe) {
+				t.Fatal("fixture identity/path mismatch")
+			}
+			owned[p.PID] = p
+		}
+	}
+	if len(owned) != 3 || owned[childPID].PPID != root.Process.Pid {
+		t.Fatal("fixture tree not confirmed")
+	}
+	parent := owned[root.Process.Pid]
+	if parent.Args == "" || parent.ScriptPath == "" || parent.Args == "old arguments" {
+		t.Fatal("entry script was not collected")
+	}
+	// Only positively identified test processes enter the filter or suspender.
+	var candidates []Proc
+	for _, p := range owned {
+		candidates = append(candidates, p)
+	}
+	matched := Filter(candidates, []Target{target}, os.Getpid())
+	if len(matched) != 2 {
+		t.Fatalf("matched %d fixture processes, want parent and child", len(matched))
+	}
+	custom := Filter(candidates, []Target{{ID: "fixture", Name: "Fixture", Rule: ParseMatch([]string{"args:" + marker})}}, os.Getpid())
+	if len(custom) != 2 || custom[0].PID == control.Process.Pid || custom[1].PID == control.Process.Pid {
+		t.Fatal("custom args: rule failed to isolate fixture tree")
+	}
+	for _, p := range matched {
+		if (p.PID != root.Process.Pid && p.PID != childPID) || p.AppID != target.ID {
+			t.Fatal("matched control or wrong app")
+		}
+	}
+	for _, p := range matched {
+		if err = c.Freeze(p); err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(p, data, 0700); err != nil {
+	}
+	time.Sleep(80 * time.Millisecond)
+	pBefore, cBefore, controlBefore := size(parentTick), size(childTick), size(controlTick)
+	time.Sleep(160 * time.Millisecond)
+	if size(parentTick) != pBefore || size(childTick) != cBefore || size(controlTick) <= controlBefore {
+		t.Fatal("suspension did not isolate CLI tree from unrelated runtime")
+	}
+	for _, p := range matched {
+		if err = c.Resume(p); err != nil {
 			t.Fatal(err)
 		}
-		paths[key] = p
 	}
-	claude := `C:\User Name\npm\node_modules\@anthropic-ai\claude-code\cli.js`
-	for _, tc := range []struct {
-		id, key, app string
-		args         []string
-	}{
-		{"node-v1", "v1/node", "claude", []string{claude, "--prompt", "тест"}},
-		{"node-v2", "v2/node", "claude", []string{`C:/New Version/node_modules/@anthropic-ai/claude-code/cli.js`}},
-		{"bun-direct", "v2/bun", "claude", []string{claude}},
-		{"bun-run", "v2/bun", "claude", []string{"--bun", "run", claude}},
-		{"node-codex", "v2/node", "codex", []string{`C:\Updated\node_modules\@openai\codex\bin\codex.js`}},
-	} {
-		t.Run(tc.id, func(t *testing.T) {
-			marker := "--zaslon-test=" + tc.id
-			root := startCLIFixture(t, paths[tc.key], dir, tc.id, "parent", append(tc.args, marker)...)
-			control := startCLIFixture(t, paths[tc.key], dir, tc.id+"-control", "control", "server.js", "--prompt", claude)
-			parentTick, childTick, controlTick := filepath.Join(dir, tc.id+".parent.ticks"), filepath.Join(dir, tc.id+".child.ticks"), filepath.Join(dir, tc.id+"-control.control.ticks")
-			size := func(f string) int64 {
-				st, e := os.Stat(f)
-				if e != nil {
-					return 0
-				}
-				return st.Size()
-			}
-			var childPID int
-			waitCLIFixture(t, "heartbeat and child", func() bool {
-				b, _ := os.ReadFile(filepath.Join(dir, tc.id+".child.pid"))
-				childPID, _ = strconv.Atoi(string(b))
-				return childPID > 0 && size(parentTick) > 0 && size(childTick) > 0 && size(controlTick) > 0
-			})
-			c := New().(*osController)
-			// A stale cache entry simulates PID reuse; it must not supply old args.
-			c.cache[root.Process.Pid] = cached{created: -1, path: "wrong.exe", args: "old arguments", script: "wrong.js", argsRead: true}
-			all, err := c.List()
-			if err != nil {
-				t.Fatal(err)
-			}
-			owned := map[int]Proc{}
-			for _, p := range all {
-				if p.PID == root.Process.Pid || p.PID == childPID || p.PID == control.Process.Pid {
-					if p.Created == "" || !strings.EqualFold(p.Path, paths[tc.key]) {
-						t.Fatal("fixture identity/path mismatch")
-					}
-					owned[p.PID] = p
-				}
-			}
-			if len(owned) != 3 || owned[childPID].PPID != root.Process.Pid {
-				t.Fatal("fixture tree not confirmed")
-			}
-			parent := owned[root.Process.Pid]
-			if parent.Args == "" || parent.ScriptPath == "" || parent.Args == "old arguments" {
-				t.Fatal("entry script was not collected")
-			}
-			cfg := config.Default()
-			cfg.Apps = []string{tc.app}
-			cfg.CustomApps = nil
-			// Only positively identified test processes enter the filter or suspender.
-			var candidates []Proc
-			for _, p := range owned {
-				candidates = append(candidates, p)
-			}
-			matched := Filter(candidates, Targets(cfg), os.Getpid())
-			if len(matched) != 2 {
-				t.Fatalf("matched %d fixture processes, want parent and child", len(matched))
-			}
-			custom := Filter(candidates, []Target{{ID: "fixture", Name: "Fixture", Rule: ParseMatch([]string{"args:" + marker})}}, os.Getpid())
-			if len(custom) != 2 || custom[0].PID == control.Process.Pid || custom[1].PID == control.Process.Pid {
-				t.Fatal("custom args: rule failed to isolate fixture tree")
-			}
-			for _, p := range matched {
-				if (p.PID != root.Process.Pid && p.PID != childPID) || p.AppID != tc.app {
-					t.Fatal("matched control or wrong app")
-				}
-				if err = c.Freeze(p); err != nil {
-					t.Fatal(err)
-				}
-			}
-			time.Sleep(80 * time.Millisecond)
-			pBefore, cBefore, controlBefore := size(parentTick), size(childTick), size(controlTick)
-			time.Sleep(160 * time.Millisecond)
-			if size(parentTick) != pBefore || size(childTick) != cBefore || size(controlTick) <= controlBefore {
-				t.Fatal("suspension did not isolate CLI tree from unrelated runtime")
-			}
-			for _, p := range matched {
-				if err = c.Resume(p); err != nil {
-					t.Fatal(err)
-				}
-			}
-			waitCLIFixture(t, "resumed CLI tree", func() bool { return size(parentTick) > pBefore && size(childTick) > cBefore })
-			all, err = c.List()
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, p := range all {
-				if p.PID == parent.PID && (p.Created != parent.Created || p.Args != parent.Args || p.ScriptPath != parent.ScriptPath) {
-					t.Fatal("cached identity/arguments changed")
-				}
-			}
-			// Failed/empty startup reads remain retryable for the same identity.
-			ce := c.cache[parent.PID]
-			ce.args, ce.script, ce.argsRead = "", "", false
-			c.cache[parent.PID] = ce
-			if _, err = c.List(); err != nil {
-				t.Fatal(err)
-			}
-			if ce = c.cache[parent.PID]; !ce.argsRead || ce.args != parent.Args || ce.script != parent.ScriptPath {
-				t.Fatal("command line was not retried after unavailable metadata")
-			}
-			t.Log("CLI and descendant recognised, suspended and resumed; unrelated runtime kept running")
-		})
+	waitCLIFixture(t, "resumed CLI tree", func() bool { return size(parentTick) > pBefore && size(childTick) > cBefore })
+	all, err = c.List()
+	if err != nil {
+		t.Fatal(err)
 	}
+	for _, p := range all {
+		if p.PID == parent.PID && (p.Created != parent.Created || p.Args != parent.Args || p.ScriptPath != parent.ScriptPath) {
+			t.Fatal("cached identity/arguments changed")
+		}
+	}
+	// Failed/empty startup reads remain retryable for the same identity.
+	ce := c.cache[parent.PID]
+	ce.args, ce.script, ce.argsRead = "", "", false
+	c.cache[parent.PID] = ce
+	if _, err = c.List(); err != nil {
+		t.Fatal(err)
+	}
+	if ce = c.cache[parent.PID]; !ce.argsRead || ce.args != parent.Args || ce.script != parent.ScriptPath {
+		t.Fatal("command line was not retried after unavailable metadata")
+	}
+	t.Log("CLI and descendant recognised, suspended and resumed; unrelated runtime kept running")
 }
