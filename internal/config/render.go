@@ -25,7 +25,7 @@ var templates = map[string]tpl{
 		header: "# Zaslon - настройки. Сохраните файл, и Zaslon подхватит изменения сам, перезапуск не нужен.\n" +
 			"# Справка: https://github.com/avazar/zaslon/blob/dev/README.md",
 		apps: "# Какие приложения защищать. Готовые: claude, chatgpt, codex, cursor, windsurf,\n" +
-			"# copilot, gemini, perplexity, telegram, discord, slack, zoom.",
+			"# antigravity, antigravity-ide, copilot, gemini, perplexity, telegram, discord, slack, zoom.",
 		appsList: "# Список и как их ищет Zaslon - в меню «Защищаемые приложения».",
 		custom: "# Свои приложения. match - имя файла (myapp, myapp.exe) или часть пути (/MyApp.app/),\n" +
 			"# для скриптов - часть командной строки с префиксом args: (args:my-cli.js).\n" +
@@ -52,7 +52,7 @@ var templates = map[string]tpl{
 		header: "# Zaslon settings. Save the file and Zaslon picks the changes up, no restart needed.\n" +
 			"# Docs: https://github.com/avazar/zaslon/blob/dev/README.en.md#settings",
 		apps: "# Which apps to protect. Built-in: claude, chatgpt, codex, cursor, windsurf,\n" +
-			"# copilot, gemini, perplexity, telegram, discord, slack, zoom.",
+			"# antigravity, antigravity-ide, copilot, gemini, perplexity, telegram, discord, slack, zoom.",
 		appsList: "# See the \"Protected apps\" menu for how each one is matched.",
 		custom: "# Your own apps. match is a file name (myapp, myapp.exe) or part of a path (/MyApp.app/),\n" +
 			"# for scripts - part of the command line prefixed with args: (args:my-cli.js).\n" +

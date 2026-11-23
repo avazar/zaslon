@@ -22,6 +22,8 @@ const L = {
     domain_edit: "Редактировать домены", domain_cancel: "Отмена", domain_count: "Доменов", domain_host: "Домен", domain_checked: "Проверено",
     domain_off: "Проверки доменов выключены. Список сохранён.", domain_app_off: "Проверки начнутся после включения защиты приложения.", domain_required: "Добавьте хотя бы один домен перед включением проверок.",
     domain_unavailable: "Недоступен", domain_v6_disabled: "Проверка выключена", domain_v6_missing: "Не обнаружен", domain_stale: "Результат устарел",
+    service_hosts: "Основные домены для настройки VPN",
+    service_hosts_hint: "Эти адреса используются для запросов к API и входа в Google. Проверка Zaslon не получает от них внешний IP. По умолчанию защита ориентируется на общий IP.",
     domain_hint: "По одному домену на строку. Сохранение списка не меняет переключатель. Измеряется соединение Zaslon: свой прокси приложения, другой API-адрес или правила VPN по процессам могут дать иной выход.",
     settings_changed: "Изменены правила защиты", country_unknown: "Страна выхода IPv4 не определена", country6_unknown: "Страна выхода IPv6 не определена",
     domain_unknown: "Не удалось проверить внешний IP приложения", domain_ip: "IP сервиса не разрешён", domain_wait: "Ожидается новая проверка", domain_v6_absent: "нет IPv6 у домена или проверка отключена",
@@ -82,6 +84,8 @@ const L = {
     domain_edit: "Edit domains", domain_cancel: "Cancel", domain_count: "Domains", domain_host: "Domain", domain_checked: "Checked",
     domain_off: "Domain checks are off. Your list is saved.", domain_app_off: "Checks start when protection is enabled for this app.", domain_required: "Add at least one domain before enabling checks.",
     domain_unavailable: "Unavailable", domain_v6_disabled: "Check disabled", domain_v6_missing: "Not detected", domain_stale: "Result expired",
+    service_hosts: "Main domains for VPN routing",
+    service_hosts_hint: "These hosts handle API requests and Google sign-in. Zaslon cannot measure the exit IP on them. Protection uses the general IP check by default.",
     domain_hint: "One domain per line. Saving the list does not change the switch. This measures Zaslon's connection: an app's own proxy, another API address or per-process VPN routing may use a different exit.",
     settings_changed: "Protection settings changed", country_unknown: "IPv4 exit country unknown", country6_unknown: "IPv6 exit country unknown",
     domain_unknown: "App’s public IP could not be verified", domain_ip: "Service IP not allowed", domain_wait: "Waiting for a fresh check", domain_v6_absent: "no service IPv6 or check disabled",
@@ -306,7 +310,10 @@ function ruleEditor(app) {
 }
 
 function appSettings(a) {
-  return `<section class="app-settings" id="app-settings-${encodeURIComponent(a.id)}" aria-labelledby="app-settings-button-${encodeURIComponent(a.id)}">${ruleEditor(a)}${domainSection(a)}</section>`;
+  const hosts = a.serviceHosts?.length ? `<section class="domain-section"><h3>${t("service_hosts")}</h3>
+    <ul class="service-hosts selectable">${a.serviceHosts.map(host => `<li><code>${esc(host)}</code></li>`).join("")}</ul>
+    <p class="hint">${t("service_hosts_hint")}</p></section>` : "";
+  return `<section class="app-settings" id="app-settings-${encodeURIComponent(a.id)}" aria-labelledby="app-settings-button-${encodeURIComponent(a.id)}">${ruleEditor(a)}${hosts}${domainSection(a)}</section>`;
 }
 
 // A steady colour per app name, so the list is easy to scan.

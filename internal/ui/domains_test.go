@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,13 +42,23 @@ func TestPanelDomainConfigurationAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := false
+	antigravityApps := 0
 	for _, a := range state.Apps {
+		if a.ID == "antigravity" || a.ID == "antigravity-ide" {
+			antigravityApps++
+			if !slices.Contains(a.ServiceHosts, "daily-cloudcode-pa.googleapis.com") || len(a.Domains) != 0 || a.DomainChecksEnabled {
+				t.Errorf("unexpected routing domains or active IP probes for %s: %+v", a.ID, a)
+			}
+		}
 		if a.ID == "claude" {
 			found = true
 			if len(a.Domains) != 2 || len(a.DefaultDomains) != 2 {
 				t.Fatal("panel omitted domain settings or defaults")
 			}
 		}
+	}
+	if antigravityApps != 2 {
+		t.Fatal("missing Antigravity presets")
 	}
 	if !found {
 		t.Fatal("configured app missing from panel")

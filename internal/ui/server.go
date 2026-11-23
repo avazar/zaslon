@@ -205,6 +205,7 @@ type appJSON struct {
 	Rule                *ruleJSON            `json:"rule"`
 	Domains             []string             `json:"domains"`
 	DefaultDomains      []string             `json:"defaultDomains"`
+	ServiceHosts        []string             `json:"serviceHosts,omitempty"`
 	DomainChecksEnabled bool                 `json:"domainChecksEnabled"`
 	Measurements        []guard.DomainResult `json:"measurements"`
 	DomainIssue         string               `json:"domainIssue,omitempty"`
@@ -265,6 +266,7 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 		a := appJSON{ID: p.ID, Name: p.Name, Enabled: slices.Contains(cfg.Apps, p.ID), Running: running[p.ID], Frozen: snap.FrozenApps[p.ID], Status: groupStatus[p.Name]}
 		a.Domains = cfg.DomainChecks[p.ID]
 		a.DefaultDomains = config.DefaultDomains(p.ID)
+		a.ServiceHosts = p.ServiceHosts
 		a.DomainChecksEnabled = cfg.DomainCheckEnabled(p.ID)
 		a.Measurements = measurements[p.Name]
 		a.Reason = groupReason[p.Name]

@@ -39,6 +39,36 @@ func TestFilterRejectsReusedParentPID(t *testing.T) {
 	}
 }
 
+func TestAntigravityPresets(t *testing.T) {
+	app, _ := PresetByID("antigravity")
+	ide, _ := PresetByID("antigravity-ide")
+	for _, tc := range []struct {
+		os       string
+		app, ide Rule
+		roots    []Proc
+	}{
+		{"windows", app.Windows, ide.Windows, []Proc{{Name: "Antigravity.exe"}, {Name: "Antigravity IDE.exe"}}},
+		{"linux", app.Linux, ide.Linux, []Proc{{Name: "antigravity"}, {Name: "antigravity-ide"}}},
+		{"darwin", app.Darwin, ide.Darwin, []Proc{{Path: "/Applications/Antigravity.app/Contents/MacOS/Antigravity"}, {Path: "/Applications/Antigravity IDE.app/Contents/MacOS/Electron"}}},
+	} {
+		t.Run(tc.os, func(t *testing.T) {
+			tc.roots[0].PID, tc.roots[1].PID = 10, 20
+			ps := append(tc.roots, Proc{PID: 11, PPID: 10, Name: "language_server.exe"}, Proc{PID: 21, PPID: 20, Name: "language_server.exe"},
+				Proc{PID: 30, Name: "language_server.exe"}, Proc{PID: 31, Name: "Uninstall Antigravity.exe"})
+			targets := []Target{{app.ID, app.Name, tc.app}, {ide.ID, ide.Name, tc.ide}}
+			got := Filter(ps, targets, 999)
+			if len(got) != 4 {
+				t.Fatalf("unexpected processes: %+v", got)
+			}
+			for i, pid := range []int{10, 11, 20, 21} {
+				if got[i].PID != pid || !slices.Equal(got[i].PolicyIDs, []string{targets[i/2].ID}) {
+					t.Errorf("unexpected ownership: %+v", got[i])
+				}
+			}
+		})
+	}
+}
+
 func TestRuleMatch(t *testing.T) {
 	mac, _ := PresetByID("claude")
 	cases := []struct {

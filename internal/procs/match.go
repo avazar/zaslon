@@ -74,10 +74,11 @@ type Rule struct {
 }
 
 type Preset struct {
-	ID, Name string
-	Darwin   Rule
-	Windows  Rule
-	Linux    Rule
+	ID, Name     string
+	ServiceHosts []string // reference for VPN routing; these hosts don't provide IP trace measurements
+	Darwin       Rule
+	Windows      Rule
+	Linux        Rule
 }
 
 func (p Preset) Rule() Rule {
@@ -89,6 +90,12 @@ func (p Preset) Rule() Rule {
 	default:
 		return p.Linux
 	}
+}
+
+// Shared personal-account API and sign-in hosts used by Antigravity App and IDE.
+var antigravityHosts = []string{
+	"daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com", "aicode.googleapis.com",
+	"accounts.google.com", "oauth2.googleapis.com",
 }
 
 // Presets are the apps people most often keep behind a VPN.
@@ -113,6 +120,14 @@ var Presets = []Preset{
 		Darwin:  Rule{Paths: []string{"/Windsurf.app/"}},
 		Windows: Rule{Names: []string{"Windsurf"}},
 		Linux:   Rule{Names: []string{"windsurf"}}},
+	{ID: "antigravity", Name: "Google Antigravity App", ServiceHosts: antigravityHosts,
+		Darwin:  Rule{Paths: []string{"/Antigravity.app/"}},
+		Windows: Rule{Names: []string{"Antigravity"}},
+		Linux:   Rule{Names: []string{"antigravity"}}},
+	{ID: "antigravity-ide", Name: "Google Antigravity IDE", ServiceHosts: antigravityHosts,
+		Darwin:  Rule{Paths: []string{"/Antigravity IDE.app/"}},
+		Windows: Rule{Names: []string{"Antigravity IDE"}},
+		Linux:   Rule{Names: []string{"antigravity-ide"}}},
 	{ID: "copilot", Name: "GitHub Copilot",
 		Darwin:  Rule{Names: []string{"copilot"}, Args: []string{"@github/copilot"}},
 		Windows: Rule{Names: []string{"copilot"}},
